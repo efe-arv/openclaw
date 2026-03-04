@@ -58,6 +58,7 @@ export async function handleMatrixAction(
       if (remove || isEmpty) {
         const result = await removeMatrixReactions(roomId, messageId, {
           emoji: remove ? emoji : undefined,
+          accountId: accountId ?? undefined,
         });
         return jsonResult({ ok: true, removed: result.removed });
       }
