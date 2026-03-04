@@ -1,5 +1,5 @@
-import type { ChannelDirectoryEntry } from "openclaw/plugin-sdk/matrix";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk";
+import type { ChannelDirectoryEntry } from "openclaw/plugin-sdk/matrix";
 import { resolveMatrixAuth } from "./matrix/client.js";
 
 type MatrixUserResult = {
