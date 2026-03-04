@@ -269,6 +269,11 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
       ...cfg.channels,
       matrix: {
         ...cfg.channels?.matrix,
+        // Merge per-account autoJoin settings so registerMatrixAutoJoin reads the right value
+        ...(accountConfig.autoJoin != null ? { autoJoin: accountConfig.autoJoin } : {}),
+        ...(accountConfig.autoJoinAllowlist != null
+          ? { autoJoinAllowlist: accountConfig.autoJoinAllowlist }
+          : {}),
         dm: {
           ...cfg.channels?.matrix?.dm,
           allowFrom,
@@ -309,6 +314,7 @@ export async function monitorMatrixProvider(opts: MonitorMatrixOpts = {}): Promi
     if (
       match?.channel === "matrix" &&
       (!(match as Record<string, unknown>).accountId ||
+        (match as Record<string, unknown>).accountId === "*" ||
         (match as Record<string, unknown>).accountId === account.accountId) &&
       accountRoomIds.includes(match?.peer?.id ?? "")
     ) {
