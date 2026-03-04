@@ -1,4 +1,4 @@
-import { fetchWithSsrFGuard } from "openclaw/plugin-sdk";
+import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/matrix";
 import type { ChannelDirectoryEntry } from "openclaw/plugin-sdk/matrix";
 import { resolveMatrixAuth } from "./matrix/client.js";
 
