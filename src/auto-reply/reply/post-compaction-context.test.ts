@@ -354,6 +354,23 @@ Read WORKFLOW.md on startup.
       expect(result).toContain("Be safe");
     });
 
+    it("falls back to legacy sections when default sections are configured in a different order", async () => {
+      const content = `## Every Session\n\nDo startup things.\n\n## Safety\n\nBe safe.\n`;
+      fs.writeFileSync(path.join(tmpDir, "AGENTS.md"), content);
+      const cfg = {
+        agents: {
+          defaults: {
+            compaction: { postCompactionSections: ["Red Lines", "Session Startup"] },
+          },
+        },
+      } as OpenClawConfig;
+      const result = await readPostCompactionContext(tmpDir, cfg);
+      expect(result).not.toBeNull();
+      expect(result).toContain("Do startup things");
+      expect(result).toContain("Be safe");
+      expect(result).toContain("Execute your Session Startup sequence now");
+    });
+
     it("custom section names are matched case-insensitively", async () => {
       const content = `## WORKFLOW INIT\n\nInit things.\n`;
       fs.writeFileSync(path.join(tmpDir, "AGENTS.md"), content);

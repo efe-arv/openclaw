@@ -9,6 +9,35 @@ const MAX_CONTEXT_CHARS = 3000;
 const DEFAULT_POST_COMPACTION_SECTIONS = ["Session Startup", "Red Lines"];
 const LEGACY_POST_COMPACTION_SECTIONS = ["Every Session", "Safety"];
 
+// Compare configured section names as a case-insensitive set so deployments can
+// pin the documented defaults in any order without changing fallback semantics.
+function matchesSectionSet(sectionNames: string[], expectedSections: string[]): boolean {
+  if (sectionNames.length !== expectedSections.length) {
+    return false;
+  }
+
+  const counts = new Map<string, number>();
+  for (const name of expectedSections) {
+    const normalized = name.trim().toLowerCase();
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+  }
+
+  for (const name of sectionNames) {
+    const normalized = name.trim().toLowerCase();
+    const count = counts.get(normalized);
+    if (!count) {
+      return false;
+    }
+    if (count === 1) {
+      counts.delete(normalized);
+    } else {
+      counts.set(normalized, count - 1);
+    }
+  }
+
+  return counts.size === 0;
+}
+
 function formatDateStamp(nowMs: number, timezone: string): string {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
@@ -74,13 +103,10 @@ export async function readPostCompactionContext(
     // with older AGENTS.md templates. The fallback also applies when the user
     // explicitly configures the default pair, so that pinning the documented
     // defaults never silently changes behavior vs. leaving the field unset.
-    const isExplicitDefaults =
-      Array.isArray(configuredSections) &&
-      configuredSections.length === DEFAULT_POST_COMPACTION_SECTIONS.length &&
-      configuredSections.every(
-        (s, i) => s.toLowerCase() === DEFAULT_POST_COMPACTION_SECTIONS[i].toLowerCase(),
-      );
-    if (sections.length === 0 && (!Array.isArray(configuredSections) || isExplicitDefaults)) {
+    const isDefaultSections =
+      !Array.isArray(configuredSections) ||
+      matchesSectionSet(configuredSections, DEFAULT_POST_COMPACTION_SECTIONS);
+    if (sections.length === 0 && isDefaultSections) {
       sections = extractSections(content, LEGACY_POST_COMPACTION_SECTIONS, foundSectionNames);
     }
 
@@ -108,13 +134,6 @@ export async function readPostCompactionContext(
     // "Session Startup" sequence explicitly. When custom sections are configured,
     // use generic prose — referencing a hardcoded "Session Startup" sequence
     // would be misleading for deployments that use different section names.
-    const isDefaultSections =
-      !Array.isArray(configuredSections) ||
-      (configuredSections.length === DEFAULT_POST_COMPACTION_SECTIONS.length &&
-        configuredSections.every(
-          (s, i) => s.toLowerCase() === DEFAULT_POST_COMPACTION_SECTIONS[i].toLowerCase(),
-        ));
-
     const prose = isDefaultSections
       ? "Session was just compacted. The conversation summary above is a hint, NOT a substitute for your startup sequence. " +
         "Execute your Session Startup sequence now — read the required files before responding to the user."
