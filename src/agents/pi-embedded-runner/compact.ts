@@ -930,9 +930,7 @@ export async function compactEmbeddedPiSessionDirect(
           if (
             sanityCheckBaseline > 0 &&
             tokensAfter >
-              (observedTokenCount !== undefined
-                ? sanityCheckBaseline
-                : sanityCheckBaseline * 1.1)
+              (observedTokenCount !== undefined ? sanityCheckBaseline : sanityCheckBaseline * 1.1)
           ) {
             tokensAfter = undefined; // Don't trust the estimate
           }
