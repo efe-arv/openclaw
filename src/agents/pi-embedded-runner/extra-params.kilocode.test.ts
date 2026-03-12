@@ -19,7 +19,7 @@ function applyAndCapture(params: {
 
   const baseStreamFn: StreamFn = (model, _context, options) => {
     captured.headers = options?.headers;
-    options?.onPayload?.({}, model);
+    options?.onPayload?.({});
     return createAssistantMessageEventStream();
   };
   const agent = { streamFn: baseStreamFn };

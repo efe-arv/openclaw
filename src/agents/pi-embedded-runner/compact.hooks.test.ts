@@ -64,7 +64,7 @@ const {
       },
     })),
     resolveSessionAgentIdMock: vi.fn(() => "main"),
-    estimateTokensMock: vi.fn(() => 10),
+    estimateTokensMock: vi.fn((_message?: unknown) => 10),
   };
 });
 
