@@ -351,7 +351,7 @@ export function createAnthropicFastModeWrapper(
             payloadObj.service_tier = serviceTier;
           }
         }
-        return originalOnPayload?.(payload);
+        return originalOnPayload?.(payload, model);
       },
     });
   };

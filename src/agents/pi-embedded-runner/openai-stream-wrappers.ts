@@ -306,7 +306,7 @@ export function createOpenAIFastModeWrapper(baseStreamFn: StreamFn | undefined):
             model,
           });
         }
-        return originalOnPayload?.(payload);
+        return originalOnPayload?.(payload, model);
       },
     });
   };
