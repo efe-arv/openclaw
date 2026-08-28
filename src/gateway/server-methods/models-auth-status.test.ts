@@ -55,6 +55,9 @@ const mocks = vi.hoisted(() => ({
   resolvePersistedAuthProfileOwnerAgentDir: vi.fn(
     (params: { agentDir?: string }) => params.agentDir,
   ),
+  setAuthProfileOrder: vi.fn(
+    async (): Promise<AuthProfileStore | null> => ({ version: 1, profiles: {} }),
+  ),
   refreshActiveProviderAuthRuntimeSnapshot: vi.fn(async () => false),
   clearCurrentProviderAuthState: vi.fn(),
   warmCurrentProviderAuthStateOffMainThread: vi.fn(async (_cfg: unknown) => {}),
@@ -93,6 +96,7 @@ vi.mock("../../agents/auth-profiles.js", async () => {
     removeAuthProfilesAcrossOwnerStores: mocks.removeAuthProfilesAcrossOwnerStores,
     removeProviderAuthProfilesWithLock: mocks.removeProviderAuthProfilesWithLock,
     resolvePersistedAuthProfileOwnerAgentDir: mocks.resolvePersistedAuthProfileOwnerAgentDir,
+    setAuthProfileOrder: mocks.setAuthProfileOrder,
   };
 });
 
@@ -158,6 +162,10 @@ const logoutHandler = expectDefined(
   modelsAuthStatusHandlers["models.authLogout"],
   'modelsAuthStatusHandlers["models.authLogout"] test invariant',
 );
+const orderHandler = expectDefined(
+  modelsAuthStatusHandlers["models.authOrderSet"],
+  'modelsAuthStatusHandlers["models.authOrderSet"] test invariant',
+);
 
 function createActiveRun(providerId: string, authProviderId?: string, agentId = "main") {
   return {
@@ -211,6 +219,20 @@ function createLogoutOptions(
     isWebchatConnect: () => false,
     respond,
     context,
+  } as unknown as GatewayRequestHandlerOptions & { respond: ReturnType<typeof vi.fn> };
+}
+
+function createOrderOptions(
+  params: Record<string, unknown>,
+): GatewayRequestHandlerOptions & { respond: ReturnType<typeof vi.fn> } {
+  const respond = vi.fn();
+  return {
+    req: { type: "req", id: "req-order", method: "models.authOrderSet", params },
+    params,
+    client: null,
+    isWebchatConnect: () => false,
+    respond,
+    context: { getRuntimeConfig: mocks.getRuntimeConfig } as unknown,
   } as unknown as GatewayRequestHandlerOptions & { respond: ReturnType<typeof vi.fn> };
 }
 
@@ -306,6 +328,7 @@ function resetAuthStatusMocks(): void {
   mocks.listProfilesForProvider.mockReturnValue([]);
   mocks.removeAuthProfilesAcrossOwnerStores.mockResolvedValue(true);
   mocks.removeProviderAuthProfilesWithLock.mockResolvedValue({ version: 1, profiles: {} });
+  mocks.setAuthProfileOrder.mockResolvedValue({ version: 1, profiles: {} });
   mocks.resolvePersistedAuthProfileOwnerAgentDir.mockImplementation(
     (params: { agentDir?: string }) => params.agentDir,
   );
@@ -606,6 +629,36 @@ describe("models.authStatus", () => {
       ).type,
     ).toBe("oauth");
     expect(result.providers[0]?.profiles[0]?.logoutSupported).toBe(true);
+  });
+
+  it("projects profile labels, last use, and explicit priority", async () => {
+    setPreparedAuthStore({
+      version: 1,
+      profiles: {
+        "openai:default": {
+          type: "oauth",
+          provider: "openai",
+          access: "access",
+          refresh: "refresh",
+          expires: 1_000_000,
+          email: "owner@example.com",
+          displayName: "Work account",
+        },
+      },
+      order: { openai: ["openai:default"] },
+      usageStats: { "openai:default": { lastUsed: 42 } },
+    });
+    mocks.buildAuthHealthSummary.mockReturnValue(createOpenAiCodexOauthHealthSummary());
+
+    const provider = await firstAuthStatusProvider();
+
+    expect(provider?.profileOrder).toEqual(["openai:default"]);
+    expect(provider?.profileOrderStored).toBe(true);
+    expect(provider?.profiles[0]).toMatchObject({
+      displayName: "Work account",
+      email: "owner@example.com",
+      lastUsedAt: 42,
+    });
   });
 
   it("projects provider capabilities from the published lifecycle metadata", async () => {
@@ -2073,6 +2126,80 @@ describe("models.authStatus", () => {
   });
 });
 
+describe("models.authOrderSet", () => {
+  beforeEach(() => {
+    resetAuthStatusMocks();
+    setPreparedAuthStore({
+      version: 1,
+      profiles: {
+        "openai:one": {
+          type: "oauth",
+          provider: "openai",
+          access: "one",
+          refresh: "one-refresh",
+          expires: 1_000_000,
+        },
+        "openai:two": {
+          type: "oauth",
+          provider: "openai",
+          access: "two",
+          refresh: "two-refresh",
+          expires: 1_000_000,
+        },
+      },
+    });
+  });
+
+  it("persists a complete provider profile order", async () => {
+    const opts = createOrderOptions({
+      provider: "openai",
+      profileIds: ["openai:two", "openai:one"],
+    });
+
+    await orderHandler(opts);
+
+    expect(mocks.setAuthProfileOrder).toHaveBeenCalledWith({
+      agentDir: "/tmp/agent",
+      provider: "openai",
+      order: ["openai:two", "openai:one"],
+    });
+    expect(firstRespondCall(opts)?.slice(0, 2)).toEqual([
+      true,
+      { provider: "openai", profileIds: ["openai:two", "openai:one"] },
+    ]);
+  });
+
+  it("clears the stored override with null", async () => {
+    const opts = createOrderOptions({ provider: "openai" });
+
+    await orderHandler(opts);
+
+    expect(mocks.setAuthProfileOrder).toHaveBeenCalledWith({
+      agentDir: "/tmp/agent",
+      provider: "openai",
+      order: null,
+    });
+  });
+
+  it("rejects profiles owned by another provider", async () => {
+    const opts = createOrderOptions({ provider: "anthropic", profileIds: ["openai:one"] });
+
+    await orderHandler(opts);
+
+    expect(mocks.setAuthProfileOrder).not.toHaveBeenCalled();
+    expect(firstRespondCall(opts)?.[0]).toBe(false);
+  });
+
+  it("rejects fields outside the registered request contract", async () => {
+    const opts = createOrderOptions({ provider: "openai", unexpected: true });
+
+    await orderHandler(opts);
+
+    expect(mocks.setAuthProfileOrder).not.toHaveBeenCalled();
+    expect(firstRespondCall(opts)?.[0]).toBe(false);
+  });
+});
+
 describe("models.authLogout", () => {
   beforeEach(() => {
     resetAuthStatusMocks();
@@ -2248,7 +2375,16 @@ describe("models.authLogout", () => {
 
     const [ok, , error] = firstRespondCall(opts) ?? [];
     expect(ok).toBe(false);
-    expect(error?.message).toContain("non-empty string array");
+    expect(error?.message).toContain("invalid models.authLogout params");
+  });
+
+  it("rejects fields outside the registered request contract", async () => {
+    const opts = createLogoutOptions({ provider: "openrouter", unexpected: true });
+
+    await logoutHandler(opts);
+
+    expect(mocks.removeProviderAuthProfilesWithLock).not.toHaveBeenCalled();
+    expect(firstRespondCall(opts)?.[0]).toBe(false);
   });
 
   it("aborts active runs for the removed provider only", async () => {
@@ -2426,7 +2562,7 @@ describe("models.authLogout", () => {
     await logoutHandler(opts);
     const [ok, , error] = firstRespondCall(opts) ?? [];
     expect(ok).toBe(false);
-    expect(error?.message).toBe("provider is required");
+    expect(error?.message).toContain("invalid models.authLogout params");
   });
 });
 
