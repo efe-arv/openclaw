@@ -39,6 +39,7 @@ import {
   clearCurrentProviderAuthState,
   warmCurrentProviderAuthStateOffMainThread,
 } from "../../agents/model-provider-auth.js";
+import { refreshPreparedModelRuntimeSnapshots } from "../../agents/prepared-model-runtime.js";
 import {
   type ProviderAuthAliasLookupParams,
   resolveProviderIdForAuth,
@@ -50,6 +51,7 @@ import type { UsageProviderId } from "../../infra/provider-usage.types.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { refreshActiveProviderAuthRuntimeSnapshot } from "../../secrets/runtime.js";
 import { abortChatRunsForProvider, type ChatAbortOps } from "../chat-abort.js";
+import { ADMIN_SCOPE } from "../operator-scopes.js";
 import { loadDeferredCatalog, readPreparedCatalog } from "../server-model-catalog-auth.js";
 import { formatForLog } from "../ws-log.js";
 import { modelAuthAgentScopeError, resolveModelAuthAgentScope } from "./model-auth-agent-scope.js";
@@ -321,6 +323,7 @@ function mapProvider(
   logoutProfileIds: ReadonlySet<string>,
   configBoundProfileIds: ReadonlySet<string>,
   externalCliProfileIds: ReadonlySet<string>,
+  includeProfileIdentity: boolean,
 ): ModelAuthStatusProvider {
   const providerKey = normalizeProviderId(prov.provider);
   const authProviderKey = resolveProviderIdForAuth(prov.provider, authAliasLookupParams);
@@ -378,8 +381,10 @@ function mapProvider(
         reasonCode: prof.reasonCode,
         expiry: buildExpiry(prof.remainingMs, prof.expiresAt),
         ...(externalCliProfileIds.has(prof.profileId) ? { externallyManaged: true } : {}),
-        ...(metadata.displayName ? { displayName: metadata.displayName } : {}),
-        ...(metadata.email ? { email: metadata.email } : {}),
+        ...(includeProfileIdentity && metadata.displayName
+          ? { displayName: metadata.displayName }
+          : {}),
+        ...(includeProfileIdentity && metadata.email ? { email: metadata.email } : {}),
         ...(lastUsedAt ? { lastUsedAt } : {}),
         ...((prof.type === "oauth" || prof.type === "token") &&
         logoutProfileIds.has(prof.profileId) &&
@@ -517,6 +522,12 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         includeUntrustedWorkspacePlugins: false,
       };
       const authProvider = resolveProviderIdForAuth(provider, authAliasLookupParams);
+      const availableProfileIds = Object.entries(preparedSnapshot.authStore.profiles)
+        .filter(
+          ([, credential]) =>
+            resolveProviderIdForAuth(credential.provider, authAliasLookupParams) === authProvider,
+        )
+        .map(([profileId]) => profileId);
       const invalidProfile = selection.profileIds?.find((profileId) => {
         const credential = preparedSnapshot.authStore.profiles[profileId];
         return (
@@ -535,6 +546,17 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         );
         return;
       }
+      if (selection.profileIds && selection.profileIds.length !== availableProfileIds.length) {
+        respond(
+          false,
+          undefined,
+          errorShape(
+            ErrorCodes.INVALID_REQUEST,
+            `profileIds must include every available profile for provider ${provider}`,
+          ),
+        );
+        return;
+      }
       const updated = await setAuthProfileOrder({
         agentDir: preparedSnapshot.agentDir,
         provider: authProvider,
@@ -549,11 +571,16 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         return;
       }
       invalidateModelAuthStatusCache();
-      void refreshActiveProviderAuthRuntimeSnapshot()
-        .then(() => warmCurrentProviderAuthStateOffMainThread(context.getRuntimeConfig()))
-        .catch((err: unknown) => {
-          log.warn(`provider auth state refresh after reorder failed: ${formatForLog(err)}`);
-        });
+      await refreshActiveProviderAuthRuntimeSnapshot();
+      await Promise.all([
+        refreshPreparedModelRuntimeSnapshots(cfg, {
+          catalogMode: "static",
+          allowGatewaySubagentBinding: true,
+          agentIds: new Set([scope.agentId]),
+          pluginMetadataSnapshot: preparedSnapshot.metadataSnapshot,
+        }),
+        warmCurrentProviderAuthStateOffMainThread(cfg),
+      ]);
       const result: ModelAuthOrderSetResult = {
         provider,
         profileIds: selection.profileIds,
@@ -667,9 +694,11 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)));
     }
   },
-  "models.authStatus": async ({ params, respond, context }) => {
+  "models.authStatus": async ({ params, respond, context, client }) => {
     const now = Date.now();
     const refreshRequested = Boolean(params.refresh);
+    const includeProfileIdentity =
+      Array.isArray(client?.connect?.scopes) && client.connect.scopes.includes(ADMIN_SCOPE);
     const resolveScope = (cfg: OpenClawConfig) =>
       resolveModelAuthAgentScope(
         cfg,
@@ -806,6 +835,7 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
           logoutProfileIds,
           configBoundProfileIds,
           externalCliProfileIds,
+          includeProfileIdentity,
         ),
       );
       const providerCapabilities = buildProviderCapabilities({

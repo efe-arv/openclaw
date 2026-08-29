@@ -132,6 +132,7 @@ describe("listGatewayMethods", () => {
     "sessions.github.options",
     "sessions.github.status",
     "sessions.github.confirm",
+    "models.authOrderSet",
   ];
 
   it("advertises plugin surface refresh for capability rotation", () => {
