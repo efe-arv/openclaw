@@ -2247,6 +2247,43 @@ describe("models.authOrderSet", () => {
     expect(firstRespondCall(opts)?.[0]).toBe(true);
   });
 
+  it("publishes a shared-owner reorder to every inheriting agent", async () => {
+    mocks.getRuntimeConfig.mockReturnValue({
+      agents: { list: [{ id: "main" }, { id: "writer" }] },
+    });
+    mocks.listAgentIds.mockReturnValue(["main", "writer"]);
+    const opts = createOrderOptions({
+      provider: "openai",
+      profileIds: ["openai:two", "openai:one"],
+    });
+
+    await orderHandler(opts);
+
+    expect(mocks.refreshPreparedModelRuntimeSnapshots).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ agentIds: new Set(["main", "writer"]) }),
+    );
+  });
+
+  it("keeps a local agent order refresh scoped to that agent", async () => {
+    mocks.getRuntimeConfig.mockReturnValue({
+      agents: { list: [{ id: "main" }, { id: "writer" }] },
+    });
+    mocks.listAgentIds.mockReturnValue(["main", "writer"]);
+    const opts = createOrderOptions({
+      agentId: "writer",
+      provider: "openai",
+      profileIds: ["openai:two", "openai:one"],
+    });
+
+    await orderHandler(opts);
+
+    expect(mocks.refreshPreparedModelRuntimeSnapshots).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ agentIds: new Set(["writer"]) }),
+    );
+  });
+
   it("clears the stored override with null", async () => {
     const opts = createOrderOptions({ provider: "openai" });
 
