@@ -1516,7 +1516,19 @@ describe("models.authStatus", () => {
 
   it("routes claude-cli OAuth profiles to Anthropic usage with plan and billing", async () => {
     const runtimeConfig = {};
+    const plugins = [
+      {
+        id: "anthropic",
+        origin: "bundled",
+        providerAuthAliases: { "claude-cli": "anthropic" },
+      },
+    ];
     mocks.getRuntimeConfig.mockReturnValue(runtimeConfig);
+    setPreparedMetadataSnapshot({
+      index: { plugins: [] },
+      manifestRegistry: { plugins },
+      plugins,
+    });
     const profile = {
       profileId: "claude-cli",
       provider: "claude-cli",
