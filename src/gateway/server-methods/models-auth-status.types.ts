@@ -33,6 +33,8 @@ export type ModelAuthStatusProfile = {
 
 export type ModelAuthStatusProvider = {
   provider: string;
+  /** Canonical credential owner used for profile ordering mutations. */
+  authProvider?: string;
   displayName: string;
   status: AuthProviderHealthStatus;
   expiry?: ModelAuthExpiry;
