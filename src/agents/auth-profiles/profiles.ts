@@ -19,6 +19,7 @@ import { resolveAuthProfileDatabasePath } from "./sqlite.js";
 import {
   ensureAuthProfileStoreForLocalUpdate,
   isSharedMainAuthProfileAgentDir,
+  loadAuthProfileStoreWithoutExternalProfiles,
   resolvePersistedAuthProfileOwnerAgentDir,
   resolveRuntimeAuthProfileAgentDir,
   saveAuthProfileStore,
@@ -49,19 +50,21 @@ export class AuthProfileOrderChangedError extends Error {
 function listProviderAuthStateEntries<T>(
   entries: Record<string, T> | undefined,
   provider: string,
+  authAliasLookupParams?: ProviderAuthAliasLookupParams,
 ): Array<[string, T]> {
-  const canonicalProvider = resolveProviderIdForAuth(provider);
+  const canonicalProvider = resolveProviderIdForAuth(provider, authAliasLookupParams);
   return Object.entries(entries ?? {})
-    .filter(([key]) => resolveProviderIdForAuth(key) === canonicalProvider)
+    .filter(([key]) => resolveProviderIdForAuth(key, authAliasLookupParams) === canonicalProvider)
     .toSorted(([left], [right]) => left.localeCompare(right));
 }
 
 function readProviderAuthState<T>(
   entries: Record<string, T> | undefined,
   provider: string,
+  authAliasLookupParams?: ProviderAuthAliasLookupParams,
 ): T | undefined {
-  const canonicalProvider = resolveProviderIdForAuth(provider);
-  const matches = listProviderAuthStateEntries(entries, canonicalProvider);
+  const canonicalProvider = resolveProviderIdForAuth(provider, authAliasLookupParams);
+  const matches = listProviderAuthStateEntries(entries, canonicalProvider, authAliasLookupParams);
   return (
     matches.find(([key]) => normalizeProviderId(key) === canonicalProvider)?.[1] ?? matches[0]?.[1]
   );
@@ -71,11 +74,12 @@ function replaceProviderAuthState<T>(
   entries: Record<string, T> | undefined,
   provider: string,
   value?: T,
+  authAliasLookupParams?: ProviderAuthAliasLookupParams,
 ): Record<string, T> | undefined {
-  const canonicalProvider = resolveProviderIdForAuth(provider);
+  const canonicalProvider = resolveProviderIdForAuth(provider, authAliasLookupParams);
   const next = Object.fromEntries(
     Object.entries(entries ?? {}).filter(
-      ([key]) => resolveProviderIdForAuth(key) !== canonicalProvider,
+      ([key]) => resolveProviderIdForAuth(key, authAliasLookupParams) !== canonicalProvider,
     ),
   ) as Record<string, T>;
   if (value !== undefined) {
@@ -101,8 +105,8 @@ export async function setAuthProfileOrder(params: {
   agentDir?: string;
   provider: string;
   order?: string[] | null;
-  /** Effective provider profiles observed before entering the write transaction. */
-  expectedProviderProfileIds?: readonly string[];
+  /** Effective persisted provider profiles observed before entering the write transaction. */
+  expectedPersistedProviderProfileIds?: readonly string[];
   /** Provider profiles whose effective owner was the local store. */
   expectedLocalProviderProfileIds?: readonly string[];
   authAliasLookupParams?: ProviderAuthAliasLookupParams;
@@ -111,6 +115,26 @@ export async function setAuthProfileOrder(params: {
   const sanitized =
     params.order && Array.isArray(params.order) ? normalizeStringEntries(params.order) : [];
   const deduped = dedupeProfileIds(sanitized);
+  const expectedPersisted = params.expectedPersistedProviderProfileIds
+    ? [...new Set(params.expectedPersistedProviderProfileIds)].toSorted()
+    : undefined;
+  if (expectedPersisted) {
+    // Re-read inherited membership immediately before the synchronous local transaction. With no
+    // await between these operations, a same-process main-store writer cannot interleave a commit.
+    const currentPersisted = Object.entries(
+      loadAuthProfileStoreWithoutExternalProfiles(params.agentDir).profiles,
+    )
+      .filter(
+        ([, credential]) =>
+          resolveProviderIdForAuth(credential.provider, params.authAliasLookupParams) ===
+          providerKey,
+      )
+      .map(([profileId]) => profileId)
+      .toSorted();
+    if (!isDeepStrictEqual(currentPersisted, expectedPersisted)) {
+      throw new AuthProfileOrderChangedError();
+    }
+  }
 
   return await updateAuthProfileStoreWithLock({
     agentDir: params.agentDir,
@@ -124,8 +148,8 @@ export async function setAuthProfileOrder(params: {
     // (deduped.length === 0) must not preserve anything.
     ...(deduped.length > 0 ? { saveOptions: { preserveOrderProfileIds: deduped } } : {}),
     updater: (store) => {
-      if (params.expectedProviderProfileIds && params.expectedLocalProviderProfileIds) {
-        const expectedProvider = new Set(params.expectedProviderProfileIds);
+      if (expectedPersisted && params.expectedLocalProviderProfileIds) {
+        const expectedProvider = new Set(expectedPersisted);
         const expectedLocal = new Set(params.expectedLocalProviderProfileIds);
         const expected = [...expectedLocal].toSorted();
         const current = Object.entries(store.profiles)
@@ -144,13 +168,26 @@ export async function setAuthProfileOrder(params: {
         }
       }
       if (deduped.length === 0) {
-        if (listProviderAuthStateEntries(store.order, providerKey).length === 0) {
+        if (
+          listProviderAuthStateEntries(store.order, providerKey, params.authAliasLookupParams)
+            .length === 0
+        ) {
           return false;
         }
-        store.order = replaceProviderAuthState(store.order, providerKey);
+        store.order = replaceProviderAuthState(
+          store.order,
+          providerKey,
+          undefined,
+          params.authAliasLookupParams,
+        );
         return true;
       }
-      store.order = replaceProviderAuthState(store.order, providerKey, deduped);
+      store.order = replaceProviderAuthState(
+        store.order,
+        providerKey,
+        deduped,
+        params.authAliasLookupParams,
+      );
       return true;
     },
   });

@@ -2216,7 +2216,7 @@ describe("models.authOrderSet", () => {
       provider: "openai",
       order: ["openai:two", "openai:one"],
       authAliasLookupParams: expect.objectContaining({ includeUntrustedWorkspacePlugins: false }),
-      expectedProviderProfileIds: ["openai:one", "openai:two"],
+      expectedPersistedProviderProfileIds: ["openai:one", "openai:two"],
       expectedLocalProviderProfileIds: ["openai:one", "openai:two"],
     });
     expect(firstRespondCall(opts)?.slice(0, 2)).toEqual([
@@ -2262,7 +2262,7 @@ describe("models.authOrderSet", () => {
       expect.objectContaining({
         provider: "anthropic",
         order: ["anthropic:cli"],
-        expectedProviderProfileIds: ["anthropic:cli"],
+        expectedPersistedProviderProfileIds: ["anthropic:cli"],
         expectedLocalProviderProfileIds: ["anthropic:cli"],
       }),
     );
@@ -2337,7 +2337,7 @@ describe("models.authOrderSet", () => {
       provider: "openai",
       order: null,
       authAliasLookupParams: expect.objectContaining({ includeUntrustedWorkspacePlugins: false }),
-      expectedProviderProfileIds: ["openai:one", "openai:two"],
+      expectedPersistedProviderProfileIds: ["openai:one", "openai:two"],
       expectedLocalProviderProfileIds: ["openai:one", "openai:two"],
     });
   });

@@ -1838,7 +1838,7 @@ describe("setAuthProfileOrder", () => {
           agentDir,
           provider: "openai",
           order: ["openai:one"],
-          expectedProviderProfileIds: ["openai:one"],
+          expectedPersistedProviderProfileIds: ["openai:one"],
           expectedLocalProviderProfileIds: ["openai:one"],
         }),
       ).rejects.toBeInstanceOf(AuthProfileOrderChangedError);
@@ -1876,13 +1876,77 @@ describe("setAuthProfileOrder", () => {
             agentDir: customAgentDir,
             provider: "openai",
             order: [profileId],
-            expectedProviderProfileIds: [profileId],
+            expectedPersistedProviderProfileIds: [profileId],
             expectedLocalProviderProfileIds: [],
           }),
         ).resolves.toMatchObject({ order: { openai: [profileId] } });
       },
       { clearOAuthDir: true },
     );
+  });
+
+  it("rejects an inherited order when main provider membership changed", async () => {
+    await withAuthProfileTestState(
+      "openclaw-auth-order-stale-main-",
+      async ({ agentDirFor }) => {
+        const customAgentDir = agentDirFor("custom");
+        const profileId = "openai:remaining";
+        fs.mkdirSync(customAgentDir, { recursive: true });
+        saveAuthProfileStore({
+          version: AUTH_STORE_VERSION,
+          profiles: {
+            [profileId]: { type: "api_key", provider: "openai", key: "remaining" },
+          },
+        });
+
+        await expect(
+          setAuthProfileOrder({
+            agentDir: customAgentDir,
+            provider: "openai",
+            order: [profileId],
+            expectedPersistedProviderProfileIds: [profileId, "openai:removed"],
+            expectedLocalProviderProfileIds: [],
+          }),
+        ).rejects.toBeInstanceOf(AuthProfileOrderChangedError);
+      },
+      { clearOAuthDir: true },
+    );
+  });
+
+  it("uses prepared workspace aliases when clearing provider state", async () => {
+    await withAuthProfileTestState("openclaw-auth-order-workspace-alias-", async ({ agentDir }) => {
+      fs.mkdirSync(agentDir, { recursive: true });
+      saveAuthProfileStore(
+        {
+          version: AUTH_STORE_VERSION,
+          profiles: {
+            "fixture:one": { type: "api_key", provider: "fixture-workspace", key: "one" },
+          },
+          order: { "fixture-workspace": ["fixture:one"] },
+        },
+        agentDir,
+      );
+      const authAliasLookupParams = {
+        metadataSnapshot: {
+          plugins: [
+            {
+              id: "fixture",
+              origin: "bundled" as const,
+              providerAuthAliases: { "fixture-workspace": "fixture-provider" },
+            },
+          ],
+        } as never,
+      };
+
+      await setAuthProfileOrder({
+        agentDir,
+        provider: "fixture-provider",
+        order: null,
+        authAliasLookupParams,
+      });
+
+      expect(loadPersistedAuthProfileStore(agentDir)?.order).toBeUndefined();
+    });
   });
 
   it("canonicalizes every alias-equivalent provider state mutation", async () => {
