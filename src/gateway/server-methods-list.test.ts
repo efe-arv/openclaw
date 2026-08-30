@@ -239,6 +239,18 @@ describe("listGatewayMethods", () => {
     }
   });
 
+  it("protects provider priority as an administrative control-plane write", () => {
+    const descriptor = createCoreGatewayMethodDescriptors(coreGatewayHandlers).find(
+      (candidate) => candidate.name === "models.authOrderSet",
+    );
+
+    expect(descriptor).toMatchObject({
+      name: "models.authOrderSet",
+      scope: "operator.admin",
+      controlPlaneWrite: true,
+    });
+  });
+
   it("does not advertise hidden core handlers", () => {
     const methods = listGatewayMethods();
     expect(methods).not.toContain("node.runnerInventory.update");

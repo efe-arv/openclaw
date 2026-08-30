@@ -18,9 +18,11 @@ import {
   formatRemainingShort,
 } from "../../agents/auth-health.js";
 import {
+  AuthProfileOrderChangedError,
   type AuthProfileStore,
   ensureAuthProfileStoreWithoutExternalProfiles,
   externalCliDiscoveryForConfigStatus,
+  getRuntimeLocalProfileIds,
   listProfilesForProvider,
   removeAuthProfilesAcrossOwnerStores,
   removeProviderAuthProfilesWithLock,
@@ -406,7 +408,9 @@ function mapProvider(
             ...(usage.summary ? { summary: usage.summary } : {}),
             ...(usage.plan ? { plan: usage.plan } : {}),
             ...(usage.billing?.length ? { billing: usage.billing } : {}),
-            ...(usage.accountEmail ? { accountEmail: usage.accountEmail } : {}),
+            ...(includeProfileIdentity && usage.accountEmail
+              ? { accountEmail: usage.accountEmail }
+              : {}),
           }
         : undefined,
   };
@@ -563,6 +567,10 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         agentDir: preparedSnapshot.agentDir,
         provider: authProvider,
         order: selection.profileIds,
+        authAliasLookupParams,
+        expectedLocalProviderProfileIds: availableProfileIds.filter((profileId) =>
+          getRuntimeLocalProfileIds(preparedSnapshot.authStore).includes(profileId),
+        ),
       });
       if (!updated) {
         respond(
@@ -593,6 +601,17 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
       };
       respond(true, result, undefined);
     } catch (err) {
+      if (err instanceof AuthProfileOrderChangedError) {
+        respond(
+          false,
+          undefined,
+          errorShape(
+            ErrorCodes.UNAVAILABLE,
+            "provider accounts changed while priority was being saved; refresh and try again",
+          ),
+        );
+        return;
+      }
       respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, formatForLog(err)));
     }
   },
