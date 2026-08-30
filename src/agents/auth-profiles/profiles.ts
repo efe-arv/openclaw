@@ -103,10 +103,13 @@ function updateSuccessfulUsageStatsEntry(
 /** Sets or clears explicit auth profile order for a provider. */
 export async function setAuthProfileOrder(params: {
   agentDir?: string;
+  inheritedAuthDir?: string;
   provider: string;
   order?: string[] | null;
-  /** Effective persisted provider profiles observed before entering the write transaction. */
-  expectedPersistedProviderProfileIds?: readonly string[];
+  /** Effective provider profiles observed from the prepared runtime owner. */
+  expectedProviderProfileIds?: readonly string[];
+  /** Runtime-only profiles included in the prepared effective provider membership. */
+  expectedRuntimeExternalProfileIds?: readonly string[];
   /** Provider profiles whose effective owner was the local store. */
   expectedLocalProviderProfileIds?: readonly string[];
   authAliasLookupParams?: ProviderAuthAliasLookupParams;
@@ -115,14 +118,17 @@ export async function setAuthProfileOrder(params: {
   const sanitized =
     params.order && Array.isArray(params.order) ? normalizeStringEntries(params.order) : [];
   const deduped = dedupeProfileIds(sanitized);
-  const expectedPersisted = params.expectedPersistedProviderProfileIds
-    ? [...new Set(params.expectedPersistedProviderProfileIds)].toSorted()
+  const expectedProvider = params.expectedProviderProfileIds
+    ? [...new Set(params.expectedProviderProfileIds)].toSorted()
     : undefined;
-  if (expectedPersisted) {
+  let expectedPersisted: string[] | undefined;
+  if (expectedProvider) {
     // Re-read inherited membership immediately before the synchronous local transaction. With no
     // await between these operations, a same-process main-store writer cannot interleave a commit.
     const currentPersisted = Object.entries(
-      loadAuthProfileStoreWithoutExternalProfiles(params.agentDir).profiles,
+      loadAuthProfileStoreWithoutExternalProfiles(params.agentDir, {
+        ...(params.inheritedAuthDir ? { inheritedAuthDir: params.inheritedAuthDir } : {}),
+      }).profiles,
     )
       .filter(
         ([, credential]) =>
@@ -131,9 +137,13 @@ export async function setAuthProfileOrder(params: {
       )
       .map(([profileId]) => profileId)
       .toSorted();
-    if (!isDeepStrictEqual(currentPersisted, expectedPersisted)) {
+    const currentEffective = [
+      ...new Set([...currentPersisted, ...(params.expectedRuntimeExternalProfileIds ?? [])]),
+    ].toSorted();
+    if (!isDeepStrictEqual(currentEffective, expectedProvider)) {
       throw new AuthProfileOrderChangedError();
     }
+    expectedPersisted = currentPersisted;
   }
 
   return await updateAuthProfileStoreWithLock({

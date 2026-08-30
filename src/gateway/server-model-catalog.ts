@@ -145,6 +145,7 @@ export async function loadPreparedGatewayModelCatalogSnapshot(
     }
     return {
       ...projectGatewayModelCatalogSnapshot(owner),
+      ...(owner.inheritedAuthDir ? { inheritedAuthDir: owner.inheritedAuthDir } : {}),
       authModes: refreshedAuth?.authModes ?? owner.authModes,
       authStore: refreshedAuth?.authStore ?? owner.authStore,
       metadataSnapshot: owner.metadataSnapshot,
@@ -159,6 +160,7 @@ export async function loadGatewayModelCatalogSnapshot(
   const {
     authModes: _authModes,
     authStore: _authStore,
+    inheritedAuthDir: _inheritedAuthDir,
     metadataSnapshot: _metadataSnapshot,
     authMaterializations: _authMaterializations,
     ...snapshot
@@ -214,6 +216,7 @@ export async function readPreparedGatewayModelCatalogOwnerSnapshot(
   const owner = resolvePublishedModelCatalogOwner(candidate);
   return {
     ...projectGatewayModelCatalogSnapshot(owner),
+    ...(owner.inheritedAuthDir ? { inheritedAuthDir: owner.inheritedAuthDir } : {}),
     authModes: owner.authModes,
     authStore: owner.authStore,
     metadataSnapshot: owner.metadataSnapshot,

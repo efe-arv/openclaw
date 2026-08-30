@@ -566,11 +566,15 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
       }
       const updated = await setAuthProfileOrder({
         agentDir: preparedSnapshot.agentDir,
+        ...(preparedSnapshot.inheritedAuthDir
+          ? { inheritedAuthDir: preparedSnapshot.inheritedAuthDir }
+          : {}),
         provider: authProvider,
         order: selection.profileIds,
         authAliasLookupParams,
-        expectedPersistedProviderProfileIds: availableProfileIds.filter(
-          (profileId) => !runtimeExternalProfileIds.has(profileId),
+        expectedProviderProfileIds: availableProfileIds,
+        expectedRuntimeExternalProfileIds: availableProfileIds.filter((profileId) =>
+          runtimeExternalProfileIds.has(profileId),
         ),
         expectedLocalProviderProfileIds: availableProfileIds.filter((profileId) =>
           getRuntimeLocalProfileIds(preparedSnapshot.authStore).includes(profileId),
