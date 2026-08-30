@@ -1838,11 +1838,51 @@ describe("setAuthProfileOrder", () => {
           agentDir,
           provider: "openai",
           order: ["openai:one"],
+          expectedProviderProfileIds: ["openai:one"],
           expectedLocalProviderProfileIds: ["openai:one"],
         }),
       ).rejects.toBeInstanceOf(AuthProfileOrderChangedError);
       expect(loadPersistedAuthProfileStore(agentDir)?.order).toBeUndefined();
     });
+  });
+
+  it("accepts a locally persisted OAuth row owned by the inherited main store", async () => {
+    await withAuthProfileTestState(
+      "openclaw-auth-order-inherited-owner-",
+      async ({ agentDirFor }) => {
+        const mainAgentDir = agentDirFor("main");
+        const customAgentDir = agentDirFor("custom");
+        const profileId = "openai:shared";
+        const credential = {
+          type: "oauth" as const,
+          provider: "openai",
+          access: "access",
+          refresh: "refresh",
+          expires: Date.now() + 60_000,
+        };
+        fs.mkdirSync(mainAgentDir, { recursive: true });
+        fs.mkdirSync(customAgentDir, { recursive: true });
+        saveAuthProfileStore({
+          version: AUTH_STORE_VERSION,
+          profiles: { [profileId]: credential },
+        });
+        saveAuthProfileStore(
+          { version: AUTH_STORE_VERSION, profiles: { [profileId]: credential } },
+          customAgentDir,
+        );
+
+        await expect(
+          setAuthProfileOrder({
+            agentDir: customAgentDir,
+            provider: "openai",
+            order: [profileId],
+            expectedProviderProfileIds: [profileId],
+            expectedLocalProviderProfileIds: [],
+          }),
+        ).resolves.toMatchObject({ order: { openai: [profileId] } });
+      },
+      { clearOAuthDir: true },
+    );
   });
 
   it("canonicalizes every alias-equivalent provider state mutation", async () => {

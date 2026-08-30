@@ -8,7 +8,7 @@ import {
   validateModelsAuthLogoutParams,
   validateModelsAuthOrderSetParams,
 } from "../../../packages/gateway-protocol/src/index.js";
-import { listAgentIds, tryResolveAmbientOwnerAgentId } from "../../agents/agent-scope-config.js";
+import { tryResolveAmbientOwnerAgentId } from "../../agents/agent-scope-config.js";
 import {
   type AuthHealthSummary,
   type AuthProfileHealthStatus,
@@ -32,7 +32,6 @@ import {
   setAuthProfileOrder,
 } from "../../agents/auth-profiles.js";
 import { getRuntimeExternalCliProfileIds } from "../../agents/auth-profiles/runtime-external-profile-references.js";
-import { resolveLegacyInheritedAuthAgentId } from "../../agents/legacy-inherited-auth-dir.js";
 import {
   isNonSecretApiKeyMarker,
   NON_ENV_SECRETREF_MARKER,
@@ -42,7 +41,6 @@ import {
   clearCurrentProviderAuthState,
   warmCurrentProviderAuthStateOffMainThread,
 } from "../../agents/model-provider-auth.js";
-import { refreshPreparedModelRuntimeSnapshots } from "../../agents/prepared-model-runtime.js";
 import {
   type ProviderAuthAliasLookupParams,
   resolveProviderIdForAuth,
@@ -568,6 +566,7 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         provider: authProvider,
         order: selection.profileIds,
         authAliasLookupParams,
+        expectedProviderProfileIds: availableProfileIds,
         expectedLocalProviderProfileIds: availableProfileIds.filter((profileId) =>
           getRuntimeLocalProfileIds(preparedSnapshot.authStore).includes(profileId),
         ),
@@ -582,19 +581,13 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
       }
       invalidateModelAuthStatusCache();
       await refreshActiveProviderAuthRuntimeSnapshot();
-      const affectedAgentIds =
-        scope.agentId === resolveLegacyInheritedAuthAgentId(cfg)
-          ? new Set(listAgentIds(cfg))
-          : new Set([scope.agentId]);
-      await Promise.all([
-        refreshPreparedModelRuntimeSnapshots(cfg, {
-          catalogMode: "static",
-          allowGatewaySubagentBinding: true,
-          agentIds: affectedAgentIds,
-          pluginMetadataSnapshot: preparedSnapshot.metadataSnapshot,
-        }),
-        warmCurrentProviderAuthStateOffMainThread(cfg),
-      ]);
+      // Store publication already invalidates and rebuilds the affected prepared owners. Starting
+      // a second config publication here can race hot reload and revive its older config snapshot.
+      void warmCurrentProviderAuthStateOffMainThread(context.getRuntimeConfig()).catch(
+        (err: unknown) => {
+          log.warn(`provider auth state rewarm after priority update failed: ${formatForLog(err)}`);
+        },
+      );
       const result: ModelAuthOrderSetResult = {
         provider,
         profileIds: selection.profileIds,

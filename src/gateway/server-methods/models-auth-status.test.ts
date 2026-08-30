@@ -2216,6 +2216,7 @@ describe("models.authOrderSet", () => {
       provider: "openai",
       order: ["openai:two", "openai:one"],
       authAliasLookupParams: expect.objectContaining({ includeUntrustedWorkspacePlugins: false }),
+      expectedProviderProfileIds: ["openai:one", "openai:two"],
       expectedLocalProviderProfileIds: ["openai:one", "openai:two"],
     });
     expect(firstRespondCall(opts)?.slice(0, 2)).toEqual([
@@ -2261,6 +2262,7 @@ describe("models.authOrderSet", () => {
       expect.objectContaining({
         provider: "anthropic",
         order: ["anthropic:cli"],
+        expectedProviderProfileIds: ["anthropic:cli"],
         expectedLocalProviderProfileIds: ["anthropic:cli"],
       }),
     );
@@ -2296,14 +2298,15 @@ describe("models.authOrderSet", () => {
     expect(firstRespondCall(opts)?.[2]).toMatchObject({ code: "UNAVAILABLE" });
   });
 
-  it("publishes the reordered auth owner before acknowledging success", async () => {
-    let finishPublication: (() => void) | undefined;
-    mocks.refreshPreparedModelRuntimeSnapshots.mockImplementationOnce(
+  it("does not republish a stale config after the durable order write", async () => {
+    let finishWrite: (() => void) | undefined;
+    mocks.setAuthProfileOrder.mockImplementationOnce(
       () =>
-        new Promise<void>((resolve) => {
-          finishPublication = resolve;
+        new Promise<AuthProfileStore>((resolve) => {
+          finishWrite = () => resolve({ version: 1, profiles: {} });
         }),
     );
+    const currentConfig = { gateway: { reload: { mode: "hot" as const } } };
     const opts = createOrderOptions({
       provider: "openai",
       profileIds: ["openai:two", "openai:one"],
@@ -2311,58 +2314,17 @@ describe("models.authOrderSet", () => {
 
     const pending = orderHandler(opts);
     await waitForFast(() => {
-      expect(mocks.refreshPreparedModelRuntimeSnapshots).toHaveBeenCalledWith(
-        {},
-        expect.objectContaining({
-          catalogMode: "static",
-          allowGatewaySubagentBinding: true,
-          agentIds: new Set(["main"]),
-        }),
-      );
+      expect(mocks.setAuthProfileOrder).toHaveBeenCalledOnce();
     });
     expect(opts.respond).not.toHaveBeenCalled();
+    mocks.getRuntimeConfig.mockReturnValue(currentConfig);
 
-    finishPublication?.();
+    finishWrite?.();
     await pending;
 
     expect(firstRespondCall(opts)?.[0]).toBe(true);
-  });
-
-  it("publishes a shared-owner reorder to every inheriting agent", async () => {
-    mocks.getRuntimeConfig.mockReturnValue({
-      agents: { list: [{ id: "main" }, { id: "writer" }] },
-    });
-    mocks.listAgentIds.mockReturnValue(["main", "writer"]);
-    const opts = createOrderOptions({
-      provider: "openai",
-      profileIds: ["openai:two", "openai:one"],
-    });
-
-    await orderHandler(opts);
-
-    expect(mocks.refreshPreparedModelRuntimeSnapshots).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ agentIds: new Set(["main", "writer"]) }),
-    );
-  });
-
-  it("keeps a local agent order refresh scoped to that agent", async () => {
-    mocks.getRuntimeConfig.mockReturnValue({
-      agents: { list: [{ id: "main" }, { id: "writer" }] },
-    });
-    mocks.listAgentIds.mockReturnValue(["main", "writer"]);
-    const opts = createOrderOptions({
-      agentId: "writer",
-      provider: "openai",
-      profileIds: ["openai:two", "openai:one"],
-    });
-
-    await orderHandler(opts);
-
-    expect(mocks.refreshPreparedModelRuntimeSnapshots).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ agentIds: new Set(["writer"]) }),
-    );
+    expect(mocks.refreshPreparedModelRuntimeSnapshots).not.toHaveBeenCalled();
+    expect(mocks.warmCurrentProviderAuthStateOffMainThread).toHaveBeenCalledWith(currentConfig);
   });
 
   it("clears the stored override with null", async () => {
@@ -2375,6 +2337,7 @@ describe("models.authOrderSet", () => {
       provider: "openai",
       order: null,
       authAliasLookupParams: expect.objectContaining({ includeUntrustedWorkspacePlugins: false }),
+      expectedProviderProfileIds: ["openai:one", "openai:two"],
       expectedLocalProviderProfileIds: ["openai:one", "openai:two"],
     });
   });

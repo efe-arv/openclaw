@@ -101,7 +101,9 @@ export async function setAuthProfileOrder(params: {
   agentDir?: string;
   provider: string;
   order?: string[] | null;
-  /** Persisted provider profiles observed before entering the write transaction. */
+  /** Effective provider profiles observed before entering the write transaction. */
+  expectedProviderProfileIds?: readonly string[];
+  /** Provider profiles whose effective owner was the local store. */
   expectedLocalProviderProfileIds?: readonly string[];
   authAliasLookupParams?: ProviderAuthAliasLookupParams;
 }): Promise<AuthProfileStore | null> {
@@ -122,13 +124,18 @@ export async function setAuthProfileOrder(params: {
     // (deduped.length === 0) must not preserve anything.
     ...(deduped.length > 0 ? { saveOptions: { preserveOrderProfileIds: deduped } } : {}),
     updater: (store) => {
-      if (params.expectedLocalProviderProfileIds) {
-        const expected = [...new Set(params.expectedLocalProviderProfileIds)].toSorted();
+      if (params.expectedProviderProfileIds && params.expectedLocalProviderProfileIds) {
+        const expectedProvider = new Set(params.expectedProviderProfileIds);
+        const expectedLocal = new Set(params.expectedLocalProviderProfileIds);
+        const expected = [...expectedLocal].toSorted();
         const current = Object.entries(store.profiles)
           .filter(
-            ([, credential]) =>
+            ([profileId, credential]) =>
               resolveProviderIdForAuth(credential.provider, params.authAliasLookupParams) ===
-              providerKey,
+                providerKey &&
+              // A secondary store can physically retain the same OAuth row whose effective owner
+              // is main. Ignore that duplicate, but retain any newly introduced profile id.
+              (expectedLocal.has(profileId) || !expectedProvider.has(profileId)),
           )
           .map(([profileId]) => profileId)
           .toSorted();
