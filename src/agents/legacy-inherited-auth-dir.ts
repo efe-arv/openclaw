@@ -38,8 +38,9 @@ export function resolveInheritedAuthProfileWriteAgentDir(
   agentDir: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined {
-  return normalizeAgentId(agentId) === normalizeAgentId(resolveLegacyInheritedAuthAgentId(config))
-    ? resolveLegacyInheritedAuthDir(config, env)
+  return resolveSharedAuthStoreOwnership(env).location === "state-db" &&
+    normalizeAgentId(agentId) === normalizeAgentId(resolveLegacyInheritedAuthAgentId(config))
+    ? undefined
     : agentDir;
 }
 
