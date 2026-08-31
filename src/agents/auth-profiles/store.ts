@@ -965,22 +965,32 @@ export async function updateAuthProfileStoreWithLock(params: {
   updater: (store: AuthProfileStore) => boolean;
 }): Promise<AuthProfileStore | null> {
   const agentDir = resolveRuntimeAuthProfileAgentDir(params.agentDir);
+  const transactionEnv = params.stateDir
+    ? { ...process.env, OPENCLAW_STATE_DIR: params.stateDir, OPENCLAW_AGENT_DIR: undefined }
+    : getScopedAuthProfileEnv();
   let publishRuntimeSnapshots: RuntimeSnapshotPublication | undefined;
   let store: AuthProfileStore;
   try {
+    // Legacy-source discovery is filesystem work. Complete it for every owner before BEGIN;
+    // the guarded section below may only reread canonical SQLite rows.
+    loadAuthProfileStoreForAgent(
+      agentDir,
+      { readOnly: true, syncExternalCli: false },
+      transactionEnv,
+    );
+    const guardStoreParams = params.guardStore;
+    if (guardStoreParams) {
+      loadAuthProfileStoreForAgent(
+        resolveRuntimeAuthProfileAgentDir(guardStoreParams.agentDir),
+        { readOnly: true, syncExternalCli: false },
+        transactionEnv,
+      );
+    }
     const updateLocalStore = (guardStore?: AuthProfileStore) =>
       runAuthProfileWriteTransaction(
         agentDir,
         (database, owner) => {
-          const loadedStore = loadAuthProfileStoreForAgent(
-            agentDir,
-            {
-              database,
-              readOnly: true,
-              syncExternalCli: false,
-            },
-            owner.env,
-          );
+          const loadedStore = loadAuthProfileStoreFromPreparedDatabase(agentDir, database);
           if (guardStore && params.guardStore) {
             params.guardStore.validate(guardStore, loadedStore);
           }
@@ -999,10 +1009,9 @@ export async function updateAuthProfileStoreWithLock(params: {
         {
           sharedStoreWrite: params.sharedStoreWrite,
           stateDir: params.stateDir,
-          env: params.stateDir ? undefined : getScopedAuthProfileEnv(),
+          env: transactionEnv,
         },
       );
-    const guardStoreParams = params.guardStore;
     if (!guardStoreParams) {
       store = updateLocalStore();
     } else {
@@ -1011,15 +1020,14 @@ export async function updateAuthProfileStoreWithLock(params: {
       // order; reversing it would deadlock two concurrent writers.
       store = runAuthProfileWriteTransaction(
         resolveRuntimeAuthProfileAgentDir(guardStoreParams.agentDir),
-        (database, owner) => {
-          const guardStore = loadAuthProfileStoreForAgent(
-            guardStoreParams.agentDir,
-            { database, readOnly: true, syncExternalCli: false },
-            owner.env,
+        (database) => {
+          const guardStore = loadAuthProfileStoreFromPreparedDatabase(
+            resolveRuntimeAuthProfileAgentDir(guardStoreParams.agentDir),
+            database,
           );
           return updateLocalStore(guardStore);
         },
-        { stateDir: params.stateDir, env: params.stateDir ? undefined : getScopedAuthProfileEnv() },
+        { stateDir: params.stateDir, env: transactionEnv },
       );
     }
   } catch (error) {
@@ -1035,6 +1043,20 @@ export async function updateAuthProfileStoreWithLock(params: {
   }
   publishRuntimeSnapshotsAfterCommit(publishRuntimeSnapshots);
   return store;
+}
+
+function loadAuthProfileStoreFromPreparedDatabase(
+  agentDir: string | undefined,
+  database: AuthProfileDatabase,
+): AuthProfileStore {
+  assertAuthProfileMigrationStateAtDatabasePath(database.path);
+  const store = loadPersistedAuthProfileStore(agentDir, { database });
+  if (!store && inspectPersistedAuthProfileStoreRaw(agentDir, database).status !== "missing") {
+    throw new AuthProfileStoreUnreadableError(database.path);
+  }
+  return applyScopedAuthReadThrough(
+    markRuntimePersistedProfiles(store ?? createEmptyAuthProfileStore()),
+  );
 }
 
 /** Load the main auth profile store with runtime external profiles overlaid. */
