@@ -31,6 +31,18 @@ export function resolveLegacyInheritedAuthDir(
     : undefined;
 }
 
+/** Route the configured inheritance owner to the canonical shared state store. */
+export function resolveInheritedAuthProfileWriteAgentDir(
+  config: OpenClawConfig,
+  agentId: string,
+  agentDir: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  return normalizeAgentId(agentId) === normalizeAgentId(resolveLegacyInheritedAuthAgentId(config))
+    ? resolveLegacyInheritedAuthDir(config, env)
+    : agentDir;
+}
+
 export function pinLegacyInheritedAuthOwnerForRosterTransition(
   sourceConfig: OpenClawConfig,
   targetConfig: OpenClawConfig,

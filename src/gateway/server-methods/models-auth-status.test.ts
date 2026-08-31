@@ -704,6 +704,38 @@ describe("models.authStatus", () => {
     expect(provider?.profiles[0]?.source).toBe("inherited");
   });
 
+  it("marks configured profile order as externally managed", async () => {
+    mocks.getRuntimeConfig.mockReturnValue({
+      auth: { order: { openai: ["openai:default"] } },
+    });
+    setPreparedAuthStore({
+      version: 1,
+      profiles: {
+        "openai:default": {
+          type: "oauth",
+          provider: "openai",
+          access: "access",
+          refresh: "refresh",
+          expires: 1_000_000,
+        },
+        "openai:backup": {
+          type: "oauth",
+          provider: "openai",
+          access: "backup-access",
+          refresh: "backup-refresh",
+          expires: 1_000_000,
+        },
+      },
+    });
+    mocks.buildAuthHealthSummary.mockReturnValue(createOpenAiCodexOauthHealthSummary());
+
+    const provider = await firstAuthStatusProvider();
+
+    expect(provider?.profileOrder).toEqual(["openai:default"]);
+    expect(provider?.profileOrderStored).toBeUndefined();
+    expect(provider?.profileOrderLocked).toBe("auth-config");
+  });
+
   it("omits profile identity for read-only clients", async () => {
     setPreparedAuthStore({
       version: 1,

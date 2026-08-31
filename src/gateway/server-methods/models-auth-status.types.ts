@@ -45,8 +45,8 @@ export type ModelAuthStatusProvider = {
   profileOrder?: string[];
   /** True when the priority is a stored override that can be reset. */
   profileOrderStored?: boolean;
-  /** Present when configuration pins one profile and runtime priority cannot change it. */
-  profileOrderLocked?: "provider-config";
+  /** Present when configuration owns priority and runtime order cannot change it. */
+  profileOrderLocked?: "provider-config" | "auth-config";
   apiKey?: {
     source: "config" | "env";
     envVar?: string;

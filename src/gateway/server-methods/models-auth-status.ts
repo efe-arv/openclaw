@@ -33,6 +33,7 @@ import {
   setAuthProfileOrder,
 } from "../../agents/auth-profiles.js";
 import { getRuntimeExternalCliProfileIds } from "../../agents/auth-profiles/runtime-external-profile-references.js";
+import { resolveInheritedAuthProfileWriteAgentDir } from "../../agents/legacy-inherited-auth-dir.js";
 import {
   isNonSecretApiKeyMarker,
   NON_ENV_SECRETREF_MARKER,
@@ -345,6 +346,7 @@ function mapProvider(
   );
   const localProfileIds = new Set(getRuntimeLocalProfileIds(store));
   const providerOrderLocked = configBoundAuthProviders.has(authProviderKey);
+  const configuredOrderLocked = profileOrder.order !== undefined && !profileOrder.fromStore;
   const usageProfile =
     prov.profiles.find((profile) => profile.type === "oauth" || profile.type === "token") ??
     prov.profiles.find((profile) => profile.type === "api_key");
@@ -417,7 +419,11 @@ function mapProvider(
     ...(profileOrder.fromStore && localOrderProviders.has(authProviderKey)
       ? { profileOrderStored: true }
       : {}),
-    ...(providerOrderLocked ? { profileOrderLocked: "provider-config" as const } : {}),
+    ...(providerOrderLocked
+      ? { profileOrderLocked: "provider-config" as const }
+      : configuredOrderLocked
+        ? { profileOrderLocked: "auth-config" as const }
+        : {}),
     ...(apiKey ? { apiKey } : {}),
     usage:
       usage && usageKey
@@ -605,7 +611,11 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         throw new AuthProfileOrderChangedError();
       }
       const updated = await setAuthProfileOrder({
-        agentDir: preparedSnapshot.agentDir,
+        agentDir: resolveInheritedAuthProfileWriteAgentDir(
+          preparedSnapshot.config,
+          scope.agentId,
+          preparedSnapshot.agentDir,
+        ),
         ...(preparedSnapshot.inheritedAuthDir
           ? { inheritedAuthDir: preparedSnapshot.inheritedAuthDir }
           : {}),

@@ -86,6 +86,7 @@ import {
   setRuntimeAuthProfileStoreSnapshotAtDatabasePath,
   type OwnedRuntimeAuthProfileStoreSnapshotEntry,
 } from "./runtime-snapshots.js";
+import { prepareFreshSharedAuthStoreWrite } from "./shared-store-bootstrap.js";
 import {
   deferAuthProfilePostCommitPublication,
   deletePersistedAuthProfileStoreRaw,
@@ -971,10 +972,16 @@ export async function updateAuthProfileStoreWithLock(params: {
   let publishRuntimeSnapshots: RuntimeSnapshotPublication | undefined;
   let store: AuthProfileStore;
   try {
+    const sharedStoreWrite = prepareFreshSharedAuthStoreWrite({
+      agentDir,
+      allowExplicitMain: params.sharedStoreWrite === true,
+      env: transactionEnv ?? process.env,
+    });
+    const writeAgentDir = sharedStoreWrite ? undefined : agentDir;
     // Legacy-source discovery is filesystem work. Complete it for every owner before BEGIN;
     // the guarded section below may only reread canonical SQLite rows.
     loadAuthProfileStoreForAgent(
-      agentDir,
+      writeAgentDir,
       { readOnly: true, syncExternalCli: false },
       transactionEnv,
     );
@@ -990,7 +997,7 @@ export async function updateAuthProfileStoreWithLock(params: {
       runAuthProfileWriteTransaction(
         agentDir,
         (database, owner) => {
-          const loadedStore = loadAuthProfileStoreFromPreparedDatabase(agentDir, database);
+          const loadedStore = loadAuthProfileStoreFromPreparedDatabase(writeAgentDir, database);
           if (guardStore && params.guardStore) {
             params.guardStore.validate(guardStore, loadedStore);
           }
@@ -998,7 +1005,7 @@ export async function updateAuthProfileStoreWithLock(params: {
           if (shouldSave) {
             publishRuntimeSnapshots = saveAuthProfileStoreInTransaction(
               loadedStore,
-              agentDir,
+              writeAgentDir,
               params.saveOptions,
               database,
               owner,
