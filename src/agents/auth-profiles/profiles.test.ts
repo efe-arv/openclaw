@@ -6,6 +6,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveOAuthDir } from "../../config/paths.js";
 import {
@@ -55,6 +56,7 @@ import {
   restoreAuthProfileStorePersistenceSnapshot,
   saveAuthProfileStoreIfPersistenceSnapshotMatches,
   saveAuthProfileStore,
+  updateAuthProfileStoreWithLock,
 } from "./store.js";
 import { testing as storeTesting } from "./store.test-support.js";
 import type { AuthProfileStore, RuntimeAuthProfileStore } from "./types.js";
@@ -1819,6 +1821,56 @@ describe("promoteAuthProfileInOrder", () => {
 });
 
 describe("setAuthProfileOrder", () => {
+  it("holds the inherited owner lock through the local priority commit", async () => {
+    await withAuthProfileTestState(
+      "openclaw-auth-order-inherited-lock-",
+      async ({ agentDirFor }) => {
+        const inheritedAuthDir = agentDirFor("auth-owner");
+        const localAgentDir = agentDirFor("custom");
+        fs.mkdirSync(inheritedAuthDir, { recursive: true });
+        fs.mkdirSync(localAgentDir, { recursive: true });
+        saveAuthProfileStore(
+          {
+            version: AUTH_STORE_VERSION,
+            profiles: {
+              "openai:shared": { type: "api_key", provider: "openai", key: "shared" },
+            },
+          },
+          inheritedAuthDir,
+        );
+        const contender = new DatabaseSync(resolveAuthProfileDatabasePath(inheritedAuthDir));
+        contender.exec("PRAGMA busy_timeout = 0");
+        let inheritedLockObserved = false;
+
+        try {
+          await updateAuthProfileStoreWithLock({
+            agentDir: localAgentDir,
+            guardStore: {
+              agentDir: inheritedAuthDir,
+              validate: () => {
+                expect(() => contender.exec("BEGIN IMMEDIATE")).toThrow();
+                inheritedLockObserved = true;
+              },
+            },
+            updater: (store) => {
+              store.order = { openai: ["openai:shared"] };
+              return true;
+            },
+            saveOptions: { preserveOrderProfileIds: ["openai:shared"] },
+          });
+        } finally {
+          contender.close();
+        }
+
+        expect(inheritedLockObserved).toBe(true);
+        expect(loadPersistedAuthProfileStore(localAgentDir)?.order?.openai).toEqual([
+          "openai:shared",
+        ]);
+      },
+      { clearOAuthDir: true },
+    );
+  });
+
   it("rejects an order when provider membership changed before the locked write", async () => {
     await withAuthProfileTestState("openclaw-auth-order-stale-", async ({ agentDir }) => {
       fs.mkdirSync(agentDir, { recursive: true });

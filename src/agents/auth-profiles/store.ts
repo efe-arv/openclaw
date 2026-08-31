@@ -954,6 +954,11 @@ function mergeRuntimeExternalProfileState(params: {
 /** Apply an auth store update inside the SQLite write lock; null only on lock contention. */
 export async function updateAuthProfileStoreWithLock(params: {
   agentDir?: string;
+  /** Keep this owner locked while validating and committing the local update. */
+  guardStore?: {
+    agentDir?: string;
+    validate: (guardStore: AuthProfileStore, localStore: AuthProfileStore) => void;
+  };
   sharedStoreWrite?: boolean;
   stateDir?: string;
   saveOptions?: SaveAuthProfileStoreOptions;
@@ -963,36 +968,60 @@ export async function updateAuthProfileStoreWithLock(params: {
   let publishRuntimeSnapshots: RuntimeSnapshotPublication | undefined;
   let store: AuthProfileStore;
   try {
-    store = runAuthProfileWriteTransaction(
-      agentDir,
-      (database, owner) => {
-        const loadedStore = loadAuthProfileStoreForAgent(
-          agentDir,
-          {
-            database,
-            readOnly: true,
-            syncExternalCli: false,
-          },
-          owner.env,
-        );
-        const shouldSave = params.updater(loadedStore);
-        if (shouldSave) {
-          publishRuntimeSnapshots = saveAuthProfileStoreInTransaction(
-            loadedStore,
+    const updateLocalStore = (guardStore?: AuthProfileStore) =>
+      runAuthProfileWriteTransaction(
+        agentDir,
+        (database, owner) => {
+          const loadedStore = loadAuthProfileStoreForAgent(
             agentDir,
-            params.saveOptions,
-            database,
-            owner,
+            {
+              database,
+              readOnly: true,
+              syncExternalCli: false,
+            },
+            owner.env,
           );
-        }
-        return loadedStore;
-      },
-      {
-        sharedStoreWrite: params.sharedStoreWrite,
-        stateDir: params.stateDir,
-        env: params.stateDir ? undefined : getScopedAuthProfileEnv(),
-      },
-    );
+          if (guardStore && params.guardStore) {
+            params.guardStore.validate(guardStore, loadedStore);
+          }
+          const shouldSave = params.updater(loadedStore);
+          if (shouldSave) {
+            publishRuntimeSnapshots = saveAuthProfileStoreInTransaction(
+              loadedStore,
+              agentDir,
+              params.saveOptions,
+              database,
+              owner,
+            );
+          }
+          return loadedStore;
+        },
+        {
+          sharedStoreWrite: params.sharedStoreWrite,
+          stateDir: params.stateDir,
+          env: params.stateDir ? undefined : getScopedAuthProfileEnv(),
+        },
+      );
+    const guardStoreParams = params.guardStore;
+    if (!guardStoreParams) {
+      store = updateLocalStore();
+    } else {
+      // Inherited membership owns the outer lock so it cannot change between validation and the
+      // local commit. Every multi-owner priority write follows this same inherited-before-local
+      // order; reversing it would deadlock two concurrent writers.
+      store = runAuthProfileWriteTransaction(
+        resolveRuntimeAuthProfileAgentDir(guardStoreParams.agentDir),
+        (database, owner) => {
+          const guardStore = loadAuthProfileStoreForAgent(
+            guardStoreParams.agentDir,
+            { database, readOnly: true, syncExternalCli: false },
+            owner.env,
+          );
+          return updateLocalStore(guardStore);
+        },
+        { stateDir: params.stateDir, env: params.stateDir ? undefined : getScopedAuthProfileEnv() },
+      );
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     authProfilesLog.warn(`auth profile store update failed: ${message}`, {

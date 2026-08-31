@@ -12,6 +12,7 @@ import {
   resolveProviderIdForAuth,
 } from "../provider-auth-aliases.js";
 import { normalizeAuthProfileCredential } from "./credential-normalize.js";
+import { mergeAuthProfileStores } from "./persisted.js";
 import { dedupeProfileIds, listProfilesForProvider } from "./profile-list.js";
 import { removeRuntimeExternalProfileReferences } from "./runtime-external-profile-references.js";
 import { resolveSharedMainAuthAgentDir } from "./shared-main-dir.js";
@@ -19,7 +20,6 @@ import { resolveAuthProfileDatabasePath } from "./sqlite.js";
 import {
   ensureAuthProfileStoreForLocalUpdate,
   isSharedMainAuthProfileAgentDir,
-  loadAuthProfileStoreWithoutExternalProfiles,
   resolvePersistedAuthProfileOwnerAgentDir,
   resolveRuntimeAuthProfileAgentDir,
   saveAuthProfileStore,
@@ -122,12 +122,13 @@ export async function setAuthProfileOrder(params: {
     ? [...new Set(params.expectedProviderProfileIds)].toSorted()
     : undefined;
   let expectedPersisted: string[] | undefined;
-  if (expectedProvider) {
-    // Re-read inherited membership immediately before the synchronous local transaction. With no
-    // await between these operations, a same-process main-store writer cannot interleave a commit.
+  const validateMembership = (inheritedStore: AuthProfileStore, localStore: AuthProfileStore) => {
+    if (!expectedProvider) {
+      return;
+    }
     const currentPersisted = Object.entries(
-      loadAuthProfileStoreWithoutExternalProfiles(params.agentDir, {
-        ...(params.inheritedAuthDir ? { inheritedAuthDir: params.inheritedAuthDir } : {}),
+      mergeAuthProfileStores(inheritedStore, localStore, {
+        preserveBaseRuntimeExternalProfiles: true,
       }).profiles,
     )
       .filter(
@@ -144,10 +145,18 @@ export async function setAuthProfileOrder(params: {
       throw new AuthProfileOrderChangedError();
     }
     expectedPersisted = currentPersisted;
-  }
+  };
 
   return await updateAuthProfileStoreWithLock({
     agentDir: params.agentDir,
+    ...(expectedProvider
+      ? {
+          guardStore: {
+            ...(params.inheritedAuthDir ? { agentDir: params.inheritedAuthDir } : {}),
+            validate: validateMembership,
+          },
+        }
+      : {}),
     // Preserve requested IDs that the agent inherits (not owns) so the local
     // save path does not prune them from the order. Without this, a secondary
     // agent's `models auth order set --agent` accepts an inherited profile ID
