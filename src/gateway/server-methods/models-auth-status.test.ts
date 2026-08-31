@@ -727,11 +727,20 @@ describe("models.authStatus", () => {
         },
       },
     });
-    mocks.buildAuthHealthSummary.mockReturnValue(createOpenAiCodexOauthHealthSummary());
+    const health = createOpenAiCodexOauthHealthSummary();
+    const backup = {
+      ...health.profiles[0]!,
+      profileId: "openai:backup",
+      label: "openai:backup",
+    };
+    health.profiles.push(backup);
+    health.providers[0]?.profiles.push(backup);
+    mocks.buildAuthHealthSummary.mockReturnValue(health);
 
     const provider = await firstAuthStatusProvider();
 
     expect(provider?.profileOrder).toEqual(["openai:default"]);
+    expect(provider?.profiles).toHaveLength(2);
     expect(provider?.profileOrderStored).toBeUndefined();
     expect(provider?.profileOrderLocked).toBe("auth-config");
   });
