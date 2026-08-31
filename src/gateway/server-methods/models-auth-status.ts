@@ -42,6 +42,7 @@ import {
   clearCurrentProviderAuthState,
   warmCurrentProviderAuthStateOffMainThread,
 } from "../../agents/model-provider-auth.js";
+import { preparedModelRuntimeConfigsMatch } from "../../agents/prepared-model-runtime.js";
 import {
   type ProviderAuthAliasLookupParams,
   resolveProviderIdForAuth,
@@ -599,6 +600,9 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
           ),
         );
         return;
+      }
+      if (!preparedModelRuntimeConfigsMatch(preparedSnapshot.config, context.getRuntimeConfig())) {
+        throw new AuthProfileOrderChangedError();
       }
       const updated = await setAuthProfileOrder({
         agentDir: preparedSnapshot.agentDir,

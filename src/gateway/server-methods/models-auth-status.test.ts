@@ -62,6 +62,9 @@ const mocks = vi.hoisted(() => ({
   ),
   refreshActiveProviderAuthRuntimeSnapshot: vi.fn(async () => false),
   refreshPreparedModelRuntimeSnapshots: vi.fn(async () => {}),
+  preparedModelRuntimeConfigsMatch: vi.fn(
+    (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right),
+  ),
   clearCurrentProviderAuthState: vi.fn(),
   warmCurrentProviderAuthStateOffMainThread: vi.fn(async (_cfg: unknown) => {}),
   loadDeferredCatalog: vi.fn(),
@@ -126,6 +129,7 @@ vi.mock("../../secrets/runtime.js", () => ({
 }));
 
 vi.mock("../../agents/prepared-model-runtime.js", () => ({
+  preparedModelRuntimeConfigsMatch: mocks.preparedModelRuntimeConfigsMatch,
   refreshPreparedModelRuntimeSnapshots: mocks.refreshPreparedModelRuntimeSnapshots,
 }));
 
@@ -2340,6 +2344,30 @@ describe("models.authOrderSet", () => {
     expect(firstRespondCall(opts)?.[2]).toMatchObject({
       code: "INVALID_REQUEST",
       message: expect.stringContaining("controlled by provider configuration"),
+    });
+  });
+
+  it("rejects priority changes from a stale prepared config", async () => {
+    const currentConfig = {
+      models: { providers: { openai: { apiKey: "openai:one" } } },
+    };
+    mocks.getRuntimeConfig.mockReturnValue(currentConfig);
+    mocks.readPreparedCatalog.mockResolvedValueOnce({
+      ...createPreparedOwnerSnapshot("main"),
+      config: {},
+    });
+    const opts = createOrderOptions({
+      provider: "openai",
+      profileIds: ["openai:two", "openai:one"],
+    });
+
+    await orderHandler(opts);
+
+    expect(mocks.setAuthProfileOrder).not.toHaveBeenCalled();
+    expect(firstRespondCall(opts)?.[0]).toBe(false);
+    expect(firstRespondCall(opts)?.[2]).toMatchObject({
+      code: "UNAVAILABLE",
+      message: expect.stringContaining("refresh and try again"),
     });
   });
 
