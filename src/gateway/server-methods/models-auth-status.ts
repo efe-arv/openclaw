@@ -629,6 +629,9 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
       await refreshActiveProviderAuthRuntimeSnapshot();
       // Store publication already invalidates and rebuilds the affected prepared owners. Starting
       // a second config publication here can race hot reload and revive its older config snapshot.
+      // Join that owner's publication before acknowledging the write so an immediate selection
+      // observes the new order instead of the invalidated generation.
+      await loadDeferredCatalog(context, scope.agentId, { readOnly: true });
       void warmCurrentProviderAuthStateOffMainThread(context.getRuntimeConfig()).catch(
         (err: unknown) => {
           log.warn(`provider auth state rewarm after priority update failed: ${formatForLog(err)}`);

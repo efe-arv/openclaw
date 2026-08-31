@@ -2424,6 +2424,33 @@ describe("models.authOrderSet", () => {
     expect(mocks.warmCurrentProviderAuthStateOffMainThread).toHaveBeenCalledWith(currentConfig);
   });
 
+  it("acknowledges an order only after the prepared owner publishes it", async () => {
+    let finishPublication: (() => void) | undefined;
+    mocks.loadDeferredCatalog.mockImplementationOnce(
+      () =>
+        new Promise<ReturnType<typeof createPreparedOwnerSnapshot>>((resolve) => {
+          finishPublication = () => resolve(createPreparedOwnerSnapshot("main"));
+        }),
+    );
+    const opts = createOrderOptions({
+      provider: "openai",
+      profileIds: ["openai:two", "openai:one"],
+    });
+
+    const pending = orderHandler(opts);
+    await waitForFast(() => {
+      expect(mocks.loadDeferredCatalog).toHaveBeenCalledWith(opts.context, "main", {
+        readOnly: true,
+      });
+    });
+    expect(opts.respond).not.toHaveBeenCalled();
+
+    finishPublication?.();
+    await pending;
+
+    expect(firstRespondCall(opts)?.[0]).toBe(true);
+  });
+
   it("clears the stored override with null", async () => {
     const opts = createOrderOptions({ provider: "openai" });
 
