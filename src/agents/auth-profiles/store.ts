@@ -187,6 +187,7 @@ function applyScopedAuthReadThrough(store: AuthProfileStore): AuthProfileStore {
     merged,
     Object.keys(store.profiles),
     runtimeStoreInheritsMainState(merged, store),
+    Object.keys(store.order ?? {}),
   );
 }
 
@@ -1124,6 +1125,7 @@ export function loadAuthProfileStoreForRuntime(
     }),
     listRuntimeLocalProfileIds(store, mainStore),
     runtimeStoreInheritsMainState(mergedStore, store),
+    Object.keys(store.order ?? {}),
   );
 }
 

@@ -22,6 +22,7 @@ import {
   type AuthProfileStore,
   ensureAuthProfileStoreWithoutExternalProfiles,
   externalCliDiscoveryForConfigStatus,
+  getRuntimeLocalOrderProviders,
   getRuntimeLocalProfileIds,
   listProfilesForProvider,
   removeAuthProfilesAcrossOwnerStores,
@@ -323,6 +324,7 @@ function mapProvider(
   apiKeys: ReadonlyMap<string, ModelAuthStatusProvider["apiKey"]>,
   logoutProfileIds: ReadonlySet<string>,
   configBoundProfileIds: ReadonlySet<string>,
+  externalProfileIds: ReadonlySet<string>,
   externalCliProfileIds: ReadonlySet<string>,
   includeProfileIdentity: boolean,
 ): ModelAuthStatusProvider {
@@ -334,6 +336,15 @@ function mapProvider(
     providerKey,
     providerAuthKey: authProviderKey,
   });
+  const localOrderProviders = new Set(
+    getRuntimeLocalOrderProviders(store).map((provider) =>
+      resolveProviderIdForAuth(provider, authAliasLookupParams),
+    ),
+  );
+  const localProfileIds = new Set(getRuntimeLocalProfileIds(store));
+  const providerOrderLocked = prov.profiles.some((profile) =>
+    configBoundProfileIds.has(profile.profileId),
+  );
   const usageProfile =
     prov.profiles.find((profile) => profile.type === "oauth" || profile.type === "token") ??
     prov.profiles.find((profile) => profile.type === "api_key");
@@ -381,6 +392,13 @@ function mapProvider(
         type: prof.type,
         status: prof.status,
         reasonCode: prof.reasonCode,
+        source: configBoundProfileIds.has(prof.profileId)
+          ? "config"
+          : externalProfileIds.has(prof.profileId)
+            ? "external"
+            : localProfileIds.has(prof.profileId)
+              ? "saved"
+              : "inherited",
         expiry: buildExpiry(prof.remainingMs, prof.expiresAt),
         ...(externalCliProfileIds.has(prof.profileId) ? { externallyManaged: true } : {}),
         ...(includeProfileIdentity && metadata.displayName
@@ -396,7 +414,10 @@ function mapProvider(
       };
     }),
     ...(profileOrder.order !== undefined ? { profileOrder: profileOrder.order } : {}),
-    ...(profileOrder.fromStore ? { profileOrderStored: true } : {}),
+    ...(profileOrder.fromStore && localOrderProviders.has(authProviderKey)
+      ? { profileOrderStored: true }
+      : {}),
+    ...(providerOrderLocked ? { profileOrderLocked: "provider-config" as const } : {}),
     ...(apiKey ? { apiKey } : {}),
     usage:
       usage && usageKey
@@ -535,6 +556,22 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
       const runtimeExternalProfileIds = new Set(
         preparedSnapshot.authStore.runtimeExternalProfileIds ?? [],
       );
+      const configBoundProfileIds = resolveConfigBoundProfileIds(
+        preparedSnapshot.config,
+        preparedSnapshot.authStore,
+        authAliasLookupParams,
+      );
+      if (availableProfileIds.some((profileId) => configBoundProfileIds.has(profileId))) {
+        respond(
+          false,
+          undefined,
+          errorShape(
+            ErrorCodes.INVALID_REQUEST,
+            `profile priority for provider ${provider} is controlled by provider configuration`,
+          ),
+        );
+        return;
+      }
       const invalidProfile = selection.profileIds?.find((profileId) => {
         const credential = preparedSnapshot.authStore.profiles[profileId];
         return (
@@ -861,6 +898,7 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
           apiKeys,
           logoutProfileIds,
           configBoundProfileIds,
+          externalProfileIds,
           externalCliProfileIds,
           includeProfileIdentity,
         ),

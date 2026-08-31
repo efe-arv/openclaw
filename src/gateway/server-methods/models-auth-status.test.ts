@@ -657,6 +657,8 @@ describe("models.authStatus", () => {
       },
       order: { openai: ["openai:default"] },
       usageStats: { "openai:default": { lastUsed: 42 } },
+      runtimeLocalProfileIds: ["openai:default"],
+      runtimeLocalOrderProviders: ["openai"],
     });
     mocks.buildAuthHealthSummary.mockReturnValue(createOpenAiCodexOauthHealthSummary());
 
@@ -665,10 +667,37 @@ describe("models.authStatus", () => {
     expect(provider?.profileOrder).toEqual(["openai:default"]);
     expect(provider?.profileOrderStored).toBe(true);
     expect(provider?.profiles[0]).toMatchObject({
+      source: "saved",
       displayName: "Work account",
       email: "owner@example.com",
       lastUsedAt: 42,
     });
+  });
+
+  it("does not mark an inherited profile order as resettable", async () => {
+    setPreparedAuthStore({
+      version: 1,
+      profiles: {
+        "openai:default": {
+          type: "oauth",
+          provider: "openai",
+          access: "access",
+          refresh: "refresh",
+          expires: 1_000_000,
+        },
+      },
+      order: { openai: ["openai:default"] },
+      runtimeLocalProfileIds: [],
+      runtimeLocalOrderProviders: [],
+      runtimeInheritsMainState: true,
+    });
+    mocks.buildAuthHealthSummary.mockReturnValue(createOpenAiCodexOauthHealthSummary());
+
+    const provider = await firstAuthStatusProvider();
+
+    expect(provider?.profileOrder).toEqual(["openai:default"]);
+    expect(provider?.profileOrderStored).toBeUndefined();
+    expect(provider?.profiles[0]?.source).toBe("inherited");
   });
 
   it("omits profile identity for read-only clients", async () => {
@@ -1160,6 +1189,8 @@ describe("models.authStatus", () => {
 
     const provider = await firstAuthStatusProvider();
     expect(provider?.profiles[0]?.logoutSupported).toBeUndefined();
+    expect(provider?.profiles[0]?.source).toBe("config");
+    expect(provider?.profileOrderLocked).toBe("provider-config");
   });
 
   it("reports config API key provenance without returning the value", async () => {
@@ -2225,6 +2256,25 @@ describe("models.authOrderSet", () => {
       true,
       { provider: "openai", profileIds: ["openai:two", "openai:one"] },
     ]);
+  });
+
+  it("rejects priority changes when provider configuration pins a profile", async () => {
+    mocks.getRuntimeConfig.mockReturnValue({
+      models: { providers: { openai: { apiKey: "openai:one" } } },
+    });
+    const opts = createOrderOptions({
+      provider: "openai",
+      profileIds: ["openai:two", "openai:one"],
+    });
+
+    await orderHandler(opts);
+
+    expect(mocks.setAuthProfileOrder).not.toHaveBeenCalled();
+    expect(firstRespondCall(opts)?.[0]).toBe(false);
+    expect(firstRespondCall(opts)?.[2]).toMatchObject({
+      code: "INVALID_REQUEST",
+      message: expect.stringContaining("controlled by provider configuration"),
+    });
   });
 
   it("validates and persists an aliased provider with the prepared metadata owner", async () => {

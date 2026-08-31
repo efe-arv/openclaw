@@ -26,6 +26,8 @@ export type ModelAuthStatusProfile = {
   logoutSupported?: boolean;
   /** Credential refresh is owned by an external CLI rather than OpenClaw. */
   externallyManaged?: boolean;
+  /** Credential ownership shown by account-management clients; absent on older gateways. */
+  source?: "config" | "external" | "inherited" | "saved";
   displayName?: string;
   email?: string;
   lastUsedAt?: number;
@@ -43,6 +45,8 @@ export type ModelAuthStatusProvider = {
   profileOrder?: string[];
   /** True when the priority is a stored override that can be reset. */
   profileOrderStored?: boolean;
+  /** Present when configuration pins one profile and runtime priority cannot change it. */
+  profileOrderLocked?: "provider-config";
   apiKey?: {
     source: "config" | "env";
     envVar?: string;
