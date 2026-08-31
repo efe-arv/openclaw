@@ -557,7 +557,10 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         preparedSnapshot.authStore,
         authAliasLookupParams,
       );
-      if (availableProfileIds.some((profileId) => configBoundProfileIds.has(profileId))) {
+      if (
+        selection.profileIds &&
+        availableProfileIds.some((profileId) => configBoundProfileIds.has(profileId))
+      ) {
         respond(
           false,
           undefined,

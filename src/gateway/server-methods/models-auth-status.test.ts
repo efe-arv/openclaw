@@ -2343,6 +2343,20 @@ describe("models.authOrderSet", () => {
     });
   });
 
+  it("clears a stored override when provider configuration pins a profile", async () => {
+    mocks.getRuntimeConfig.mockReturnValue({
+      models: { providers: { openai: { apiKey: "openai:one" } } },
+    });
+    const opts = createOrderOptions({ provider: "openai" });
+
+    await orderHandler(opts);
+
+    expect(mocks.setAuthProfileOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "openai", order: null }),
+    );
+    expect(firstRespondCall(opts)?.[0]).toBe(true);
+  });
+
   it("validates and persists an aliased provider with the prepared metadata owner", async () => {
     const plugins = [
       {
