@@ -1965,6 +1965,39 @@ describe("setAuthProfileOrder", () => {
     );
   });
 
+  it("rejects an order when a runtime-only profile disappeared before commit", async () => {
+    await withAuthProfileTestState(
+      "openclaw-auth-order-stale-runtime-",
+      async ({ agentDir }) => {
+        fs.mkdirSync(agentDir, { recursive: true });
+        saveAuthProfileStore({ version: AUTH_STORE_VERSION, profiles: {} }, agentDir);
+        replaceRuntimeAuthProfileStoreSnapshots([
+          {
+            agentDir,
+            store: {
+              version: AUTH_STORE_VERSION,
+              profiles: {},
+              runtimeExternalProfileIds: [],
+              runtimeExternalProfileIdsAuthoritative: true,
+            },
+          },
+        ]);
+
+        await expect(
+          setAuthProfileOrder({
+            agentDir,
+            provider: "openai",
+            order: ["openai:external"],
+            expectedProviderProfileIds: ["openai:external"],
+            expectedLocalProviderProfileIds: [],
+          }),
+        ).rejects.toBeInstanceOf(AuthProfileOrderChangedError);
+        expect(loadPersistedAuthProfileStore(agentDir)?.order).toBeUndefined();
+      },
+      { clearOAuthDir: true },
+    );
+  });
+
   it("reads provider membership from the configured inherited auth owner", async () => {
     await withAuthProfileTestState(
       "openclaw-auth-order-configured-owner-",
@@ -2020,6 +2053,19 @@ describe("setAuthProfileOrder", () => {
           },
           agentDir,
         );
+        replaceRuntimeAuthProfileStoreSnapshots([
+          {
+            agentDir,
+            store: {
+              version: AUTH_STORE_VERSION,
+              profiles: {
+                [profileId]: { type: "api_key", provider: "openai", key: "external" },
+              },
+              runtimeExternalProfileIds: [profileId],
+              runtimeExternalProfileIdsAuthoritative: true,
+            },
+          },
+        ]);
 
         await expect(
           setAuthProfileOrder({
@@ -2027,7 +2073,6 @@ describe("setAuthProfileOrder", () => {
             provider: "openai",
             order: [profileId],
             expectedProviderProfileIds: [profileId],
-            expectedRuntimeExternalProfileIds: [profileId],
             expectedLocalProviderProfileIds: [profileId],
           }),
         ).resolves.toMatchObject({ order: { openai: [profileId] } });

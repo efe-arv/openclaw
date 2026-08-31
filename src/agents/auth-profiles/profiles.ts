@@ -19,6 +19,7 @@ import { resolveSharedMainAuthAgentDir } from "./shared-main-dir.js";
 import { resolveAuthProfileDatabasePath } from "./sqlite.js";
 import {
   ensureAuthProfileStoreForLocalUpdate,
+  getPreparedRuntimeAuthProfileStoreSnapshot,
   isSharedMainAuthProfileAgentDir,
   resolvePersistedAuthProfileOwnerAgentDir,
   resolveRuntimeAuthProfileAgentDir,
@@ -108,8 +109,6 @@ export async function setAuthProfileOrder(params: {
   order?: string[] | null;
   /** Effective provider profiles observed from the prepared runtime owner. */
   expectedProviderProfileIds?: readonly string[];
-  /** Runtime-only profiles included in the prepared effective provider membership. */
-  expectedRuntimeExternalProfileIds?: readonly string[];
   /** Provider profiles whose effective owner was the local store. */
   expectedLocalProviderProfileIds?: readonly string[];
   authAliasLookupParams?: ProviderAuthAliasLookupParams;
@@ -138,8 +137,22 @@ export async function setAuthProfileOrder(params: {
       )
       .map(([profileId]) => profileId)
       .toSorted();
+    const runtimeStore = getPreparedRuntimeAuthProfileStoreSnapshot(
+      params.agentDir,
+      params.inheritedAuthDir,
+    );
+    const currentRuntimeExternal = (runtimeStore?.runtimeExternalProfileIds ?? [])
+      .filter((profileId) => {
+        const credential = runtimeStore?.profiles[profileId];
+        return (
+          credential &&
+          resolveProviderIdForAuth(credential.provider, params.authAliasLookupParams) ===
+            providerKey
+        );
+      })
+      .toSorted();
     const currentEffective = [
-      ...new Set([...currentPersisted, ...(params.expectedRuntimeExternalProfileIds ?? [])]),
+      ...new Set([...currentPersisted, ...currentRuntimeExternal]),
     ].toSorted();
     if (!isDeepStrictEqual(currentEffective, expectedProvider)) {
       throw new AuthProfileOrderChangedError();

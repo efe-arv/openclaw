@@ -553,9 +553,6 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
             resolveProviderIdForAuth(credential.provider, authAliasLookupParams) === authProvider,
         )
         .map(([profileId]) => profileId);
-      const runtimeExternalProfileIds = new Set(
-        preparedSnapshot.authStore.runtimeExternalProfileIds ?? [],
-      );
       const configBoundProfileIds = resolveConfigBoundProfileIds(
         preparedSnapshot.config,
         preparedSnapshot.authStore,
@@ -610,9 +607,6 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         order: selection.profileIds,
         authAliasLookupParams,
         expectedProviderProfileIds: availableProfileIds,
-        expectedRuntimeExternalProfileIds: availableProfileIds.filter((profileId) =>
-          runtimeExternalProfileIds.has(profileId),
-        ),
         expectedLocalProviderProfileIds: availableProfileIds.filter((profileId) =>
           getRuntimeLocalProfileIds(preparedSnapshot.authStore).includes(profileId),
         ),
