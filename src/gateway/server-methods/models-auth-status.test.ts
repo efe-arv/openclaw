@@ -1193,6 +1193,73 @@ describe("models.authStatus", () => {
     expect(provider?.profileOrderLocked).toBe("provider-config");
   });
 
+  it("locks every provider row that shares a config-bound auth owner", async () => {
+    const plugins = [
+      {
+        id: "anthropic",
+        origin: "bundled",
+        providerAuthAliases: { "claude-cli": "anthropic" },
+      },
+    ];
+    setPreparedMetadataSnapshot({
+      index: { plugins: [] },
+      manifestRegistry: { plugins },
+      plugins,
+    });
+    mocks.getRuntimeConfig.mockReturnValue({
+      models: { providers: { anthropic: { apiKey: "anthropic:configured" } } },
+    });
+    const configured = {
+      profileId: "anthropic:configured",
+      provider: "anthropic",
+      type: "token",
+      status: "static",
+      source: "store",
+      label: "anthropic:configured",
+    } satisfies AuthHealthSummary["profiles"][number];
+    const imported = {
+      profileId: "anthropic:cli",
+      provider: "claude-cli",
+      type: "oauth",
+      status: "ok",
+      source: "store",
+      label: "anthropic:cli",
+    } satisfies AuthHealthSummary["profiles"][number];
+    setPreparedAuthStore({
+      version: 1,
+      profiles: {
+        [configured.profileId]: {
+          type: "token",
+          provider: "anthropic",
+          token: "configured",
+        },
+        [imported.profileId]: {
+          type: "oauth",
+          provider: "claude-cli",
+          access: "access",
+          refresh: "refresh",
+          expires: 1_000_000,
+        },
+      },
+    });
+    mocks.buildAuthHealthSummary.mockReturnValue({
+      now: 0,
+      warnAfterMs: 0,
+      profiles: [configured, imported],
+      providers: [
+        { provider: "anthropic", status: "static", profiles: [configured] },
+        { provider: "claude-cli", status: "ok", profiles: [imported] },
+      ],
+    });
+
+    const result = await readAuthStatus();
+
+    expect(result.providers).toEqual([
+      expect.objectContaining({ provider: "anthropic", profileOrderLocked: "provider-config" }),
+      expect.objectContaining({ provider: "claude-cli", profileOrderLocked: "provider-config" }),
+    ]);
+  });
+
   it("reports config API key provenance without returning the value", async () => {
     const configValue = ["test", "only", "value"].join("-");
     mocks.getRuntimeConfig.mockReturnValue({

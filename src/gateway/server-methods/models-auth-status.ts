@@ -324,6 +324,7 @@ function mapProvider(
   apiKeys: ReadonlyMap<string, ModelAuthStatusProvider["apiKey"]>,
   logoutProfileIds: ReadonlySet<string>,
   configBoundProfileIds: ReadonlySet<string>,
+  configBoundAuthProviders: ReadonlySet<string>,
   externalProfileIds: ReadonlySet<string>,
   externalCliProfileIds: ReadonlySet<string>,
   includeProfileIdentity: boolean,
@@ -342,9 +343,7 @@ function mapProvider(
     ),
   );
   const localProfileIds = new Set(getRuntimeLocalProfileIds(store));
-  const providerOrderLocked = prov.profiles.some((profile) =>
-    configBoundProfileIds.has(profile.profileId),
-  );
+  const providerOrderLocked = configBoundAuthProviders.has(authProviderKey);
   const usageProfile =
     prov.profiles.find((profile) => profile.type === "oauth" || profile.type === "token") ??
     prov.profiles.find((profile) => profile.type === "api_key");
@@ -884,6 +883,12 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
           .map(([profileId]) => profileId),
       );
       const configBoundProfileIds = resolveConfigBoundProfileIds(cfg, store, authAliasLookupParams);
+      const configBoundAuthProviders = new Set(
+        [...configBoundProfileIds].flatMap((profileId) => {
+          const profile = store.profiles[profileId];
+          return profile ? [resolveProviderIdForAuth(profile.provider, authAliasLookupParams)] : [];
+        }),
+      );
       const providers = authHealth.providers.map((prov) =>
         mapProvider(
           prov,
@@ -895,6 +900,7 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
           apiKeys,
           logoutProfileIds,
           configBoundProfileIds,
+          configBoundAuthProviders,
           externalProfileIds,
           externalCliProfileIds,
           includeProfileIdentity,
