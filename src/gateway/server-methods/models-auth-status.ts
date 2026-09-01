@@ -33,7 +33,6 @@ import {
   setAuthProfileOrder,
 } from "../../agents/auth-profiles.js";
 import { getRuntimeExternalCliProfileIds } from "../../agents/auth-profiles/runtime-external-profile-references.js";
-import { resolveInheritedAuthProfileWriteAgentDir } from "../../agents/legacy-inherited-auth-dir.js";
 import {
   isNonSecretApiKeyMarker,
   NON_ENV_SECRETREF_MARKER,
@@ -316,21 +315,36 @@ export function aggregateRefreshableAuthStatus(
   return { status: prov.status, expiresAt: prov.expiresAt, remainingMs: prov.remainingMs };
 }
 
-function mapProvider(
-  prov: AuthProviderHealth,
-  cfg: OpenClawConfig,
-  store: AuthProfileStore,
-  authAliasLookupParams: ProviderAuthAliasLookupParams,
-  usageByProvider: Map<string, ProviderUsageStatus>,
-  expectsOAuthSet: Set<string>,
-  apiKeys: ReadonlyMap<string, ModelAuthStatusProvider["apiKey"]>,
-  logoutProfileIds: ReadonlySet<string>,
-  configBoundProfileIds: ReadonlySet<string>,
-  configBoundAuthProviders: ReadonlySet<string>,
-  externalProfileIds: ReadonlySet<string>,
-  externalCliProfileIds: ReadonlySet<string>,
-  includeProfileIdentity: boolean,
-): ModelAuthStatusProvider {
+function mapProvider(params: {
+  provider: AuthProviderHealth;
+  config: OpenClawConfig;
+  store: AuthProfileStore;
+  authAliasLookupParams: ProviderAuthAliasLookupParams;
+  usageByProvider: Map<string, ProviderUsageStatus>;
+  expectsOAuthProviders: ReadonlySet<string>;
+  apiKeys: ReadonlyMap<string, ModelAuthStatusProvider["apiKey"]>;
+  logoutProfileIds: ReadonlySet<string>;
+  configBoundProfileIds: ReadonlySet<string>;
+  configBoundAuthProviders: ReadonlySet<string>;
+  externalProfileIds: ReadonlySet<string>;
+  externalCliProfileIds: ReadonlySet<string>;
+  includeProfileIdentity: boolean;
+}): ModelAuthStatusProvider {
+  const {
+    provider: prov,
+    config: cfg,
+    store,
+    authAliasLookupParams,
+    usageByProvider,
+    expectsOAuthProviders,
+    apiKeys,
+    logoutProfileIds,
+    configBoundProfileIds,
+    configBoundAuthProviders,
+    externalProfileIds,
+    externalCliProfileIds,
+    includeProfileIdentity,
+  } = params;
   const providerKey = normalizeProviderId(prov.provider);
   const authProviderKey = resolveProviderIdForAuth(prov.provider, authAliasLookupParams);
   const profileOrder = resolveExplicitAuthOrderSelection({
@@ -357,7 +371,7 @@ function mapProvider(
   const rawRollup = aggregateRefreshableAuthStatus(
     prov,
     Date.now(),
-    expectsOAuthSet.has(prov.provider),
+    expectsOAuthProviders.has(prov.provider),
   );
   const effectiveProfiles = prov.effectiveProfiles ?? prov.profiles;
   const refreshableProfiles = effectiveProfiles.filter(
@@ -553,6 +567,27 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         includeUntrustedWorkspacePlugins: false,
       };
       const authProvider = resolveProviderIdForAuth(provider, authAliasLookupParams);
+      const configuredOrder = resolveExplicitAuthOrderSelection({
+        storeOrder: preparedSnapshot.authStore.order,
+        configuredOrder: preparedSnapshot.config.auth?.order,
+        providerKey: normalizeProviderId(provider),
+        providerAuthKey: authProvider,
+      });
+      if (
+        selection.profileIds &&
+        configuredOrder.order !== undefined &&
+        !configuredOrder.fromStore
+      ) {
+        respond(
+          false,
+          undefined,
+          errorShape(
+            ErrorCodes.INVALID_REQUEST,
+            `profile priority for provider ${provider} is controlled by auth configuration`,
+          ),
+        );
+        return;
+      }
       const availableProfileIds = Object.entries(preparedSnapshot.authStore.profiles)
         .filter(
           ([, credential]) =>
@@ -611,21 +646,19 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         throw new AuthProfileOrderChangedError();
       }
       const updated = await setAuthProfileOrder({
-        agentDir: resolveInheritedAuthProfileWriteAgentDir(
-          preparedSnapshot.config,
-          scope.agentId,
-          preparedSnapshot.agentDir,
-        ),
+        agentDir: preparedSnapshot.agentDir,
         ...(preparedSnapshot.inheritedAuthDir
           ? { inheritedAuthDir: preparedSnapshot.inheritedAuthDir }
           : {}),
         provider: authProvider,
         order: selection.profileIds,
         authAliasLookupParams,
-        expectedProviderProfileIds: availableProfileIds,
-        expectedLocalProviderProfileIds: availableProfileIds.filter((profileId) =>
-          getRuntimeLocalProfileIds(preparedSnapshot.authStore).includes(profileId),
-        ),
+        membershipGuard: {
+          effectiveProfileIds: availableProfileIds,
+          localProfileIds: availableProfileIds.filter((profileId) =>
+            getRuntimeLocalProfileIds(preparedSnapshot.authStore).includes(profileId),
+          ),
+        },
       });
       if (!updated) {
         respond(
@@ -907,13 +940,13 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         }),
       );
       const providers = authHealth.providers.map((prov) =>
-        mapProvider(
-          prov,
-          cfg,
+        mapProvider({
+          provider: prov,
+          config: cfg,
           store,
           authAliasLookupParams,
           usageByProvider,
-          configured.expectsOAuth,
+          expectsOAuthProviders: configured.expectsOAuth,
           apiKeys,
           logoutProfileIds,
           configBoundProfileIds,
@@ -921,7 +954,7 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
           externalProfileIds,
           externalCliProfileIds,
           includeProfileIdentity,
-        ),
+        }),
       );
       const providerCapabilities = buildProviderCapabilities({
         config: cfg,

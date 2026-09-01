@@ -186,8 +186,9 @@ Other Gateway methods are blocked until they are intentionally added.
 
 `models.authOrderSet` is intentionally not exposed through this HTTP plugin. An
 `operator.admin` WebSocket client can use it to save a provider's complete
-account order; omit `profileIds` to clear the saved override and return to
-automatic selection.
+account order. Omit `profileIds` to clear the selected agent's saved override;
+the agent then resumes configured or inherited priority when present, and
+otherwise returns to automatic selection.
 
 ## WebSocket comparison
 

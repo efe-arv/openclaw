@@ -107,18 +107,20 @@ export async function setAuthProfileOrder(params: {
   inheritedAuthDir?: string;
   provider: string;
   order?: string[] | null;
-  /** Effective provider profiles observed from the prepared runtime owner. */
-  expectedProviderProfileIds?: readonly string[];
-  /** Provider profiles whose effective owner was the local store. */
-  expectedLocalProviderProfileIds?: readonly string[];
+  membershipGuard?: {
+    /** Effective provider profiles observed from the prepared runtime owner. */
+    effectiveProfileIds: readonly string[];
+    /** Provider profiles whose effective owner was the local store. */
+    localProfileIds: readonly string[];
+  };
   authAliasLookupParams?: ProviderAuthAliasLookupParams;
 }): Promise<AuthProfileStore | null> {
   const providerKey = resolveProviderIdForAuth(params.provider, params.authAliasLookupParams);
   const sanitized =
     params.order && Array.isArray(params.order) ? normalizeStringEntries(params.order) : [];
   const deduped = dedupeProfileIds(sanitized);
-  const expectedProvider = params.expectedProviderProfileIds
-    ? [...new Set(params.expectedProviderProfileIds)].toSorted()
+  const expectedProvider = params.membershipGuard
+    ? [...new Set(params.membershipGuard.effectiveProfileIds)].toSorted()
     : undefined;
   let expectedPersisted: string[] | undefined;
   const validateMembership = (inheritedStore: AuthProfileStore, localStore: AuthProfileStore) => {
@@ -180,9 +182,9 @@ export async function setAuthProfileOrder(params: {
     // (deduped.length === 0) must not preserve anything.
     ...(deduped.length > 0 ? { saveOptions: { preserveOrderProfileIds: deduped } } : {}),
     updater: (store) => {
-      if (expectedPersisted && params.expectedLocalProviderProfileIds) {
+      if (expectedPersisted && params.membershipGuard) {
         const expectedProvider = new Set(expectedPersisted);
-        const expectedLocal = new Set(params.expectedLocalProviderProfileIds);
+        const expectedLocal = new Set(params.membershipGuard.localProfileIds);
         const expected = [...expectedLocal].toSorted();
         const current = Object.entries(store.profiles)
           .filter(

@@ -1890,8 +1890,10 @@ describe("setAuthProfileOrder", () => {
           agentDir,
           provider: "openai",
           order: ["openai:one"],
-          expectedProviderProfileIds: ["openai:one"],
-          expectedLocalProviderProfileIds: ["openai:one"],
+          membershipGuard: {
+            effectiveProfileIds: ["openai:one"],
+            localProfileIds: ["openai:one"],
+          },
         }),
       ).rejects.toBeInstanceOf(AuthProfileOrderChangedError);
       expect(loadPersistedAuthProfileStore(agentDir)?.order).toBeUndefined();
@@ -1928,8 +1930,7 @@ describe("setAuthProfileOrder", () => {
             agentDir: customAgentDir,
             provider: "openai",
             order: [profileId],
-            expectedProviderProfileIds: [profileId],
-            expectedLocalProviderProfileIds: [],
+            membershipGuard: { effectiveProfileIds: [profileId], localProfileIds: [] },
           }),
         ).resolves.toMatchObject({ order: { openai: [profileId] } });
       },
@@ -1956,8 +1957,10 @@ describe("setAuthProfileOrder", () => {
             agentDir: customAgentDir,
             provider: "openai",
             order: [profileId],
-            expectedProviderProfileIds: [profileId, "openai:removed"],
-            expectedLocalProviderProfileIds: [],
+            membershipGuard: {
+              effectiveProfileIds: [profileId, "openai:removed"],
+              localProfileIds: [],
+            },
           }),
         ).rejects.toBeInstanceOf(AuthProfileOrderChangedError);
       },
@@ -1988,8 +1991,10 @@ describe("setAuthProfileOrder", () => {
             agentDir,
             provider: "openai",
             order: ["openai:external"],
-            expectedProviderProfileIds: ["openai:external"],
-            expectedLocalProviderProfileIds: [],
+            membershipGuard: {
+              effectiveProfileIds: ["openai:external"],
+              localProfileIds: [],
+            },
           }),
         ).rejects.toBeInstanceOf(AuthProfileOrderChangedError);
         expect(loadPersistedAuthProfileStore(agentDir)?.order).toBeUndefined();
@@ -2029,8 +2034,7 @@ describe("setAuthProfileOrder", () => {
             inheritedAuthDir,
             provider: "openai",
             order: [profileId],
-            expectedProviderProfileIds: [profileId],
-            expectedLocalProviderProfileIds: [],
+            membershipGuard: { effectiveProfileIds: [profileId], localProfileIds: [] },
           }),
         ).resolves.toMatchObject({ order: { openai: [profileId] } });
       },
@@ -2072,8 +2076,10 @@ describe("setAuthProfileOrder", () => {
             agentDir,
             provider: "openai",
             order: [profileId],
-            expectedProviderProfileIds: [profileId],
-            expectedLocalProviderProfileIds: [profileId],
+            membershipGuard: {
+              effectiveProfileIds: [profileId],
+              localProfileIds: [profileId],
+            },
           }),
         ).resolves.toMatchObject({ order: { openai: [profileId] } });
       },
