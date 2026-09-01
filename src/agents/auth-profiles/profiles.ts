@@ -183,7 +183,7 @@ export async function setAuthProfileOrder(params: {
     ...(deduped.length > 0 ? { saveOptions: { preserveOrderProfileIds: deduped } } : {}),
     updater: (store) => {
       if (expectedPersisted && params.membershipGuard) {
-        const expectedProvider = new Set(expectedPersisted);
+        const expectedPersistedProfiles = new Set(expectedPersisted);
         const expectedLocal = new Set(params.membershipGuard.localProfileIds);
         const expected = [...expectedLocal].toSorted();
         const current = Object.entries(store.profiles)
@@ -193,7 +193,7 @@ export async function setAuthProfileOrder(params: {
                 providerKey &&
               // A secondary store can physically retain the same OAuth row whose effective owner
               // is main. Ignore that duplicate, but retain any newly introduced profile id.
-              (expectedLocal.has(profileId) || !expectedProvider.has(profileId)),
+              (expectedLocal.has(profileId) || !expectedPersistedProfiles.has(profileId)),
           )
           .map(([profileId]) => profileId)
           .toSorted();
