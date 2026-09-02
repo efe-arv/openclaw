@@ -33,6 +33,7 @@ type CoreGatewayMethodSpecRow = readonly [
   since: string,
   policy?: CoreGatewayMethodPolicy,
 ];
+const WRITE_CONTROL = { controlPlaneWrite: true } as const;
 
 // This is the canonical core method policy table: every core handler must appear here so
 // listing, authorization, startup availability, and write throttling stay in sync.
@@ -125,13 +126,7 @@ const CORE_GATEWAY_METHOD_SPECS = [
   ["commands.list", "commands", "operator.read", "<=2026.7"],
   ["models.list", "models", "operator.read", "<=2026.7", { startup: true }],
   ["models.authStatus", "models-auth-status", "operator.read", "<=2026.7"],
-  [
-    "models.authLogout",
-    "models-auth-status",
-    "operator.admin",
-    "<=2026.7",
-    { controlPlaneWrite: true },
-  ],
+  ["models.authLogout", "models-auth-status", "operator.admin", "<=2026.7", WRITE_CONTROL],
   ["tools.catalog", "tools-catalog", "operator.read", "<=2026.7"],
   ["tools.effective", "tools-effective", "operator.read", "<=2026.7", { startup: true }],
   ["tools.invoke", "tools-invoke", "operator.write", "<=2026.7"],
@@ -649,13 +644,7 @@ const CORE_GATEWAY_METHOD_SPECS = [
     "2026.8",
     { startup: true, controlPlaneWrite: true },
   ],
-  [
-    "models.authOrderSet",
-    "models-auth-status",
-    "operator.admin",
-    "2026.8",
-    { controlPlaneWrite: true },
-  ],
+  ["models.authOrderSet", "models-auth-status", "operator.admin", "2026.8", WRITE_CONTROL],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];
 
 export type CoreGatewayHandlerFamily = Exclude<(typeof CORE_GATEWAY_METHOD_SPECS)[number][1], null>;
