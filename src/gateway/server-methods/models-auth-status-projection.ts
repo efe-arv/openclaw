@@ -3,7 +3,7 @@ import type { AuthProviderHealth } from "../../agents/auth-health.js";
 import {
   type AuthProfileStore,
   getRuntimeLocalOrderProviders,
-  getRuntimeLocalProfileIds,
+  listRuntimeLocalProfileIds,
   resolveAuthProfileMetadata,
   resolveExplicitAuthOrderSelection,
 } from "../../agents/auth-profiles.js";
@@ -77,7 +77,7 @@ export function projectModelAuthStatusProvider(params: {
       resolveProviderIdForAuth(providerId, authAliasLookupParams),
     ),
   );
-  const localProfileIds = new Set(getRuntimeLocalProfileIds(store));
+  const localProfileIds = new Set(listRuntimeLocalProfileIds(store));
   const providerOrderLocked = configBoundAuthProviders.has(authProviderKey);
   const configuredOrderLocked = profileOrder.order !== undefined && !profileOrder.fromStore;
   const usageProfile =

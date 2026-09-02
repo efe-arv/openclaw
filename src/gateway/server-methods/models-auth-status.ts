@@ -13,7 +13,7 @@ import {
   AuthProfileOrderChangedError,
   ensureAuthProfileStoreWithoutExternalProfiles,
   externalCliDiscoveryForConfigStatus,
-  getRuntimeLocalProfileIds,
+  listRuntimeLocalProfileIds,
   listProfilesForProvider,
   removeAuthProfilesAcrossOwnerStores,
   removeProviderAuthProfilesWithLock,
@@ -351,7 +351,7 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         membershipGuard: {
           effectiveProfileIds: availableProfileIds,
           localProfileIds: availableProfileIds.filter((profileId) =>
-            getRuntimeLocalProfileIds(preparedSnapshot.authStore).includes(profileId),
+            listRuntimeLocalProfileIds(preparedSnapshot.authStore).includes(profileId),
           ),
         },
       });

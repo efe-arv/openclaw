@@ -1116,11 +1116,7 @@ describe("models.authStatus", () => {
         providerAuthAliases: { "claude-cli": "anthropic" },
       },
     ];
-    setPreparedMetadataSnapshot({
-      index: { plugins: [] },
-      manifestRegistry: { plugins },
-      plugins,
-    });
+    setPreparedMetadataSnapshot(createPluginMetadataSnapshotFixture({ plugins }));
     mocks.getRuntimeConfig.mockReturnValue({
       models: { providers: { anthropic: { apiKey: "anthropic:configured" } } },
     });
@@ -1539,11 +1535,7 @@ describe("models.authStatus", () => {
       },
     ];
     mocks.getRuntimeConfig.mockReturnValue(runtimeConfig);
-    setPreparedMetadataSnapshot({
-      index: { plugins: [] },
-      manifestRegistry: { plugins },
-      plugins,
-    });
+    setPreparedMetadataSnapshot(createPluginMetadataSnapshotFixture({ plugins }));
     const profile = {
       profileId: "claude-cli",
       provider: "claude-cli",
@@ -2416,11 +2408,7 @@ describe("models.authOrderSet", () => {
         providerAuthAliases: { "claude-cli": "anthropic" },
       },
     ];
-    setPreparedMetadataSnapshot({
-      index: { plugins: [] },
-      manifestRegistry: { plugins },
-      plugins,
-    });
+    setPreparedMetadataSnapshot(createPluginMetadataSnapshotFixture({ plugins }));
     setPreparedAuthStore({
       version: 1,
       profiles: {

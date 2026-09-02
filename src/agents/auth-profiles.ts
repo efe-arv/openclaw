@@ -48,8 +48,10 @@ export {
   upsertAuthProfileWithLock,
   upsertAuthProfileWithLockOrThrow,
 } from "./auth-profiles/profiles.js";
-export { getRuntimeLocalProfileIds } from "./auth-profiles/runtime-external-profile-references.js";
-export { getRuntimeLocalOrderProviders } from "./auth-profiles/runtime-snapshot-owner.js";
+export {
+  getRuntimeLocalOrderProviders,
+  listRuntimeLocalProfileIds,
+} from "./auth-profiles/runtime-snapshot-owner.js";
 export { persistAuthProfileBatch } from "./auth-profiles/upsert-with-lock.js";
 export {
   repairOAuthProfileIdMismatch,
