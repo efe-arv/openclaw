@@ -2806,7 +2806,6 @@ src/gateway/conversation-turn.ts	1
 src/gateway/desktop/host-guidance.ts	1
 src/gateway/desktop/managed-linux.ts	1
 src/gateway/desktop/node-source-context.ts	1
-src/gateway/exec-approval-manager.ts	7
 src/gateway/gateway-cli-backend.live-helpers.ts	2
 src/gateway/gateway-cli-backend.live-probe-helpers.ts	4
 src/gateway/health/collector.ts	3
@@ -2841,7 +2840,6 @@ src/gateway/portals/portal-service.ts	1
 src/gateway/probe.ts	2
 src/gateway/restart-trace.ts	3
 src/gateway/secret-input-paths.ts	1
-src/gateway/server-aux-handlers.ts	2
 src/gateway/server-broadcast.ts	2
 src/gateway/server-channels.ts	1
 src/gateway/server-chat-state.ts	1
@@ -3070,7 +3068,6 @@ src/infra/diagnostic-trace-context.ts	2
 src/infra/diagnostic-trace-propagation.ts	3
 src/infra/directory-durability.ts	3
 src/infra/exec-approval-channel-runtime.ts	9
-src/infra/exec-approval-forwarder.ts	1
 src/infra/exec-approval-policy-snapshot.ts	2
 src/infra/exec-approval-reply.ts	2
 src/infra/exec-approvals-allowlist.ts	7

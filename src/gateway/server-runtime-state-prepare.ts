@@ -621,6 +621,7 @@ export async function prepareGatewayKernelState(params: {
     watchNodeRequestHandler,
     createHttpTransportOptions,
     transportBridge,
+    connectionWork: connectionState.connectionWork,
     clients,
     broadcast,
     broadcastToConnIds,

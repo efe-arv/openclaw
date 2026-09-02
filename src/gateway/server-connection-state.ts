@@ -9,6 +9,7 @@ import {
   createSessionEventSubscriberRegistry,
   createSessionMessageSubscriberRegistry,
 } from "./server-chat-state.js";
+import { GatewayConnectionWork } from "./server-connection-work.js";
 import { GatewayClientRegistry } from "./server/client-registry.js";
 import { canReceiveSessionEvent } from "./session-sharing.js";
 
@@ -19,8 +20,8 @@ export function createGatewayConnectionState(params: {
 }) {
   const loadRuntimeConfig = params.getRuntimeConfig ?? (() => params.cfg);
   const clients = new GatewayClientRegistry();
-  // Detached RPC dispatch can resume after close cleanup, so connection-owned
-  // producers must validate against the live transport owner before mutation.
+  // RPCs survive ordinary disconnects, so connection-owned projections still
+  // validate the live transport before publishing into a retired connection.
   const isConnectionActive = (connId: string) => {
     const client = clients.getByConnectionId(connId);
     return Boolean(client && !client.invalidated);
@@ -56,6 +57,7 @@ export function createGatewayConnectionState(params: {
 
   return {
     clients,
+    connectionWork: new GatewayConnectionWork(),
     isConnectionActive,
     ...gatewayBroadcaster,
     agentRunSeq,

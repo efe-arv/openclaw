@@ -1,5 +1,6 @@
 import { getRuntimeConfig } from "../config/io.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { retireQuestionChannelGateway } from "../infra/question-channel-runtime.js";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
 import { createGatewayChatMetadataLifecycle } from "./server-chat-metadata-lifecycle.js";
 import type { startGatewayCoreRuntime } from "./server-core-runtime.js";
@@ -231,6 +232,14 @@ export async function prepareGatewayKernelRequestRuntime(params: {
       notifyPluginMetadataChanged: kernel.notifyPluginMetadataChanged,
       getConfigReloaderHotReloadStatus: kernel.getConfigReloaderHotReloadStatus,
     });
+  });
+  kernel.addGatewayLifetimeSidecar({
+    stop: async () => {
+      // Received mutations and their finalizers join before lifetime sidecars stop.
+      // Retire this exact context too when no request ever bound its coordinator.
+      retireQuestionChannelGateway(runtime.connectionWork.signal);
+      await gatewayRequestContext.scopeUpgradeCoordinator?.close();
+    },
   });
   bindApprovalPublicationContext(gatewayRequestContext);
   await attachInitialGatewayLifetimeSidecars({

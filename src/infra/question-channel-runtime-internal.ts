@@ -2,13 +2,21 @@ import type {
   QuestionRecord,
   QuestionResolvedEvent,
 } from "../../packages/gateway-protocol/src/schema/questions.js";
+import { runWithRetainedGatewayRootWork } from "../process/gateway-work-admission.js";
+import {
+  AsyncWorkScope,
+  captureAsyncWorkTracker,
+  getAsyncWorkSignal,
+} from "../shared/async-work-scope.js";
 
 const TERMINAL_DELIVERY_RETENTION_MS = 24 * 60 * 60 * 1_000;
 
 type QuestionDeliveryFinalizer = (statusLine: string) => void | Promise<void>;
 
 type QuestionChannelEntry = {
-  record?: QuestionRecord;
+  record: QuestionRecord;
+  owner: AbortSignal | undefined;
+  track: ReturnType<typeof captureAsyncWorkTracker>;
   terminal?: QuestionResolvedEvent;
   deliveries: Map<string, QuestionDeliveryFinalizer>;
   finalizedDeliveryIds: Set<string>;
@@ -23,16 +31,14 @@ type QuestionChannelRuntime = {
     deliveryId: string;
     finalize: QuestionDeliveryFinalizer;
   }) => void;
-  clear: () => void;
+  retireGateway: (owner: AbortSignal) => void;
+  clear: () => Promise<void>;
 };
 
 function collectAnsweredLabels(
-  record: QuestionRecord | undefined,
+  record: QuestionRecord,
   event: Extract<QuestionResolvedEvent, { status: "answered" }>,
 ): string[] {
-  if (!record) {
-    return [];
-  }
   const answers = event.answers.answers;
   return record.questions.flatMap((question) => {
     // Only declared choices are safe to echo. Free-text answers can contain
@@ -47,7 +53,7 @@ function collectAnsweredLabels(
 }
 
 function formatQuestionTerminalStatusLine(params: {
-  record?: QuestionRecord;
+  record: QuestionRecord;
   event: QuestionResolvedEvent;
 }): string {
   if (params.event.status === "expired") {
@@ -67,20 +73,10 @@ export function createQuestionChannelRuntime(
   } = {},
 ): QuestionChannelRuntime {
   const entries = new Map<string, QuestionChannelEntry>();
+  const retiredGateways = new WeakSet<AbortSignal>();
+  let finalizers = new AsyncWorkScope();
+  let clearing: Promise<void> | undefined;
   const terminalRetentionMs = options.terminalRetentionMs ?? TERMINAL_DELIVERY_RETENTION_MS;
-
-  const getOrCreate = (questionId: string): QuestionChannelEntry => {
-    const existing = entries.get(questionId);
-    if (existing) {
-      return existing;
-    }
-    const created: QuestionChannelEntry = {
-      deliveries: new Map(),
-      finalizedDeliveryIds: new Set(),
-    };
-    entries.set(questionId, created);
-    return created;
-  };
 
   const finalizeDelivery = (
     questionId: string,
@@ -97,17 +93,15 @@ export function createQuestionChannelRuntime(
       record: entry.record,
       event: entry.terminal,
     });
-    try {
-      void Promise.resolve(finalize(statusLine)).catch((error: unknown) =>
-        options.onFinalizeError?.(error, questionId, deliveryId),
-      );
-    } catch (error) {
-      options.onFinalizeError?.(error, questionId, deliveryId);
-    }
+    // Global reset joins the original callback; descendants retain the requested
+    // Gateway's tracker. A late plugin caller supplies no replacement lifetime.
+    void finalizers
+      .track(() => entry.track(() => runWithRetainedGatewayRootWork(() => finalize(statusLine))))
+      .catch((error: unknown) => options.onFinalizeError?.(error, questionId, deliveryId));
   };
 
   const scheduleCleanup = (questionId: string, entry: QuestionChannelEntry) => {
-    if (entry.cleanupTimer) {
+    if (entry.cleanupTimer || entries.get(questionId) !== entry) {
       return;
     }
     entry.cleanupTimer = setTimeout(() => {
@@ -120,12 +114,24 @@ export function createQuestionChannelRuntime(
 
   return {
     handleRequested(record) {
-      const entry = getOrCreate(record.id);
-      entry.record = record;
+      const owner = getAsyncWorkSignal();
+      if (clearing || (owner && retiredGateways.has(owner))) {
+        return;
+      }
+      // The host publishes Requested before delivery; callbacks cannot create
+      // entries. A fresh accepted request may reuse an id after the manager's grace.
+      clearTimeout(entries.get(record.id)?.cleanupTimer);
+      entries.set(record.id, {
+        record,
+        owner,
+        track: captureAsyncWorkTracker(),
+        deliveries: new Map(),
+        finalizedDeliveryIds: new Set(),
+      });
     },
     handleResolved(event) {
-      const entry = getOrCreate(event.id);
-      if (entry.terminal) {
+      const entry = entries.get(event.id);
+      if (!entry || entry.terminal) {
         return;
       }
       entry.terminal = event;
@@ -135,20 +141,37 @@ export function createQuestionChannelRuntime(
       scheduleCleanup(event.id, entry);
     },
     registerDelivery({ questionId, deliveryId, finalize }) {
-      const entry = getOrCreate(questionId);
-      if (entry.finalizedDeliveryIds.has(deliveryId)) {
+      const entry = entries.get(questionId);
+      if (!entry || entry.finalizedDeliveryIds.has(deliveryId)) {
         return;
       }
       entry.deliveries.set(deliveryId, finalize);
       finalizeDelivery(questionId, entry, deliveryId, finalize);
     },
-    clear() {
-      for (const entry of entries.values()) {
-        if (entry.cleanupTimer) {
+    retireGateway(owner) {
+      // The Gateway calls this after joining received work and its finalizers,
+      // not at beginClose: an admitted resolve can still finalize deliveries.
+      retiredGateways.add(owner);
+      for (const [id, entry] of entries) {
+        if (entry.owner === owner) {
           clearTimeout(entry.cleanupTimer);
+          entries.delete(id);
         }
       }
+    },
+    clear() {
+      if (clearing) {
+        return clearing;
+      }
+      for (const entry of entries.values()) {
+        clearTimeout(entry.cleanupTimer);
+      }
       entries.clear();
+      clearing = finalizers.drain().then(() => {
+        finalizers = new AsyncWorkScope();
+        clearing = undefined;
+      });
+      return clearing;
     },
   };
 }

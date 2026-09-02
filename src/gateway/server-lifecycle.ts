@@ -8,6 +8,7 @@ import { upsertPresence } from "../infra/system-presence.js";
 import { startDiagnosticHeartbeat, stopDiagnosticHeartbeat } from "../logging/diagnostic.js";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
 import { clearSecretsRuntimeSnapshotState } from "../secrets/runtime-state.js";
+import { AsyncWorkScope } from "../shared/async-work-scope.js";
 import {
   recordRemoteNodeInfo,
   removeRemoteNodeInfo,
@@ -29,7 +30,7 @@ import {
 } from "./server-plugin-runtime-generation.js";
 import type { GatewayCloseOptions } from "./server-public.js";
 import type { prepareGatewayKernelState } from "./server-runtime-state-prepare.js";
-import { runGatewayShutdownSteps } from "./server-shutdown.js";
+import { resolveGatewayShutdownNotice, runGatewayShutdownSteps } from "./server-shutdown.js";
 import type { GatewayShutdownRuntime } from "./server-shutdown.runtime.js";
 import { createGatewaySidecarStopOwner } from "./server-sidecar-owners.js";
 import {
@@ -385,11 +386,16 @@ export async function prepareGatewayLifecycle(params: {
     mediaCleanupStopPromise ??= runtimeState.stopMediaCleanup();
     return mediaCleanupStopPromise;
   };
-  const markClosePreludeStarted = () => {
+  // Connect, RPC, and maintenance refreshes share a Gateway owner, not a socket lifetime.
+  const healthWork = new AsyncWorkScope();
+  const markClosePreludeStarted = (options?: GatewayCloseOptions) => {
     if (lifecycle.closePreludeStarted) {
       return;
     }
     lifecycle.closePreludeStarted = true;
+    healthWork.beginClose();
+    broadcast("shutdown", resolveGatewayShutdownNotice(options));
+    runtime.connectionWork.beginClose();
     postReadySidecarStopOwner.beginClose();
     gatewayLifetimeSidecarStopOwner.beginClose();
     // Fence background owners before any awaited close step can tear down the
@@ -397,7 +403,7 @@ export async function prepareGatewayLifecycle(params: {
     void stopOutboundDeliveryRecoveryForClose();
     void stopMediaCleanupForClose();
     runtimeState.stopGatewayUpdateCheck();
-    runtimeState.controlUiSessionPullRequests?.stop();
+    void runtimeState.controlUiSessionPullRequests?.stop();
     runtimeState.sessionViewerPresence?.stop();
     kernel.setDispatchReady(false);
     gatewayInstanceRuntimeRef.current?.close();
@@ -411,15 +417,17 @@ export async function prepareGatewayLifecycle(params: {
     configReloaderStopPromise ??= runtimeState.configReloader.stop();
     return configReloaderStopPromise;
   };
-  const beginClosePrelude = async () => {
+  const beginClosePrelude = async (options?: GatewayCloseOptions) => {
     fenceSessionSuspensionWritesForGatewayShutdown();
-    markClosePreludeStarted();
+    markClosePreludeStarted(options);
     // Owners are fenced synchronously above. Join them before any runtime they
     // can publish into is torn down.
     await Promise.all([
       stopOutboundDeliveryRecoveryForClose(),
       stopMediaCleanupForClose(),
       stopConfigReloaderForClose().catch(() => {}),
+      runtimeState.controlUiSessionPullRequests?.stop(),
+      healthWork.drain(),
     ]);
   };
   const runClosePrelude = async () => {
@@ -454,13 +462,19 @@ export async function prepareGatewayLifecycle(params: {
     channelManager;
   const refreshGatewayHealthSnapshotWithRuntime: typeof refreshGatewayHealthSnapshot = (
     optsResult,
-  ) =>
-    refreshGatewayHealthSnapshot({
-      ...optsResult,
-      getRuntimeSnapshot,
-      getEventLoopHealth: readinessEventLoopHealth.snapshot,
-      getConfigReloaderHotReloadStatus: kernel.getConfigReloaderHotReloadStatus,
-    });
+  ) => {
+    if (healthWork.isClosing) {
+      return Promise.reject(new Error("Gateway health refresh owner is closed"));
+    }
+    return healthWork.track(() =>
+      refreshGatewayHealthSnapshot({
+        ...optsResult,
+        getRuntimeSnapshot,
+        getEventLoopHealth: readinessEventLoopHealth.snapshot,
+        getConfigReloaderHotReloadStatus: kernel.getConfigReloaderHotReloadStatus,
+      }),
+    );
+  };
   const postReadySidecarStopOwner = createGatewaySidecarStopOwner({
     getRegistered: () => runtimeState.postReadySidecars,
     setRegistered: (sidecars) => {
@@ -550,9 +564,10 @@ export async function prepareGatewayLifecycle(params: {
     }
   };
   const closeOnStartupFailure = async () => {
+    await beginClosePrelude({ reason: "gateway startup failed" });
+    await runtime.connectionWork.drain();
     await runGatewayShutdownSteps({
       steps: [
-        { name: "close prelude fence", run: beginClosePrelude },
         { name: "gateway lifetime sidecars", run: stopRegisteredGatewayLifetimeSidecars },
         { name: "post-ready sidecars", run: stopRegisteredPostReadySidecars },
         { name: "gateway close prelude", run: runClosePrelude },

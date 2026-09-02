@@ -149,6 +149,7 @@ export async function finishGatewayStartup(params: {
     attachGatewayWsHandlers({
       wss,
       clients,
+      connectionWork: runtime.connectionWork,
       bootId,
       preauthConnectionBudget,
       port,

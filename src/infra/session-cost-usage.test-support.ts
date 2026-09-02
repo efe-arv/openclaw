@@ -6,7 +6,7 @@ type UsageCostRefreshParams = {
 };
 
 type SessionCostUsageTestApi = {
-  clearUsageCostRefreshesForTest(): void;
+  clearUsageCostRefreshesForTest(): Promise<void>;
   requestCostUsageCacheRefresh(params?: UsageCostRefreshParams): void;
   usageCostRefreshRuntime: {
     refreshCostUsageCacheForAgent(params?: UsageCostRefreshParams): Promise<"busy" | "refreshed">;
@@ -21,7 +21,7 @@ function getTestApi(): SessionCostUsageTestApi {
 
 export const testing: SessionCostUsageTestApi = {
   clearUsageCostRefreshesForTest() {
-    getTestApi().clearUsageCostRefreshesForTest();
+    return getTestApi().clearUsageCostRefreshesForTest();
   },
   requestCostUsageCacheRefresh(params) {
     getTestApi().requestCostUsageCacheRefresh(params);

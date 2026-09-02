@@ -363,12 +363,13 @@ export function createQuestionHandlers(
           }
         }
         const answer = await manager.waitAnswer(request.id, request.timeoutMs);
-        const resolvedQuestion = manager.get(request.id);
-        if (resolvedQuestion) {
+        // Reauthorize the original question's immutable routing, not a getter
+        // that could expire/cancel it merely because this observer stopped.
+        if (question) {
           const authorizationError = authorizeQuestionRecord({
             cfg: context.getRuntimeConfig(),
             client,
-            question: resolvedQuestion,
+            question,
             access: "read",
           });
           if (authorizationError) {

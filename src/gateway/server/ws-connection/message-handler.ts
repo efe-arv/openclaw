@@ -166,7 +166,9 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
   const runDetachedConnectWork = (run: () => Promise<void>, onError: (error: unknown) => void) => {
     // Connect-triggered mutations outlive hello-ok. Give each tail its own
     // root lease so suspension cannot report ready while one is still active.
-    void runWithGatewayIndependentRootWorkAdmission(run, "ws:preauth").catch(onError);
+    void params.connectionWork
+      .track(() => runWithGatewayIndependentRootWorkAdmission(run, "ws:preauth"))
+      .catch(onError);
   };
 
   const handleMessage = async (data: RawData) => {
@@ -516,8 +518,17 @@ export function attachGatewayWsMessageHandler(params: GatewayWsMessageHandlerPar
   };
 
   socket.on("message", (data) => {
-    void runWithDiagnosticTraceContext(createDiagnosticTraceContext(), () =>
-      handleIncomingMessage(data),
-    );
+    if (params.connectionWork.isClosing) {
+      return;
+    }
+    void params.connectionWork
+      .track(() =>
+        runWithDiagnosticTraceContext(createDiagnosticTraceContext(), () =>
+          handleIncomingMessage(data),
+        ),
+      )
+      .catch((error: unknown) => {
+        logGateway.error(`request dispatch failed conn=${connId}: ${formatForLog(error)}`);
+      });
   });
 }

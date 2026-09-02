@@ -2177,16 +2177,5 @@ describe("createGatewayCloseHandler", () => {
     const result = await close({ reason: "startup failed before bind" });
     expect(result.warnings).toStrictEqual([]);
   });
-
-  it("broadcasts normalized shutdown metadata", async () => {
-    const deps = createGatewayCloseTestDeps();
-    const close = createGatewayCloseHandler(deps);
-
-    await close({ reason: "  upgrade  ", restartExpectedMs: Number.NaN });
-
-    // Non-restart shutdowns omit restartExpectedMs entirely: the schema declares
-    // an optional integer and clients key the restart presentation on presence.
-    expect(deps.broadcast).toHaveBeenCalledWith("shutdown", { reason: "upgrade" });
-  });
 });
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */

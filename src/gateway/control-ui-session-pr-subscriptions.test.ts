@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createDeferredCore } from "../shared/deferred.js";
 import type { ControlUiSessionPullRequests } from "./control-ui-contract.js";
 import {
   createControlUiSessionPullRequestSubscriptions,
@@ -15,8 +16,8 @@ const READY: ControlUiSessionPullRequests = {
 
 let active: ReturnType<typeof createControlUiSessionPullRequestSubscriptions> | undefined;
 
-afterEach(() => {
-  active?.stop();
+afterEach(async () => {
+  await active?.stop();
   active = undefined;
   vi.useRealTimers();
 });
@@ -242,6 +243,80 @@ describe("control UI session PR subscriptions", () => {
       sessions: { session: { ...READY, status: "ready" } },
     });
   });
+
+  it.each(["initial hydration", "poll"] as const)(
+    "joins %s and fences queued forced refreshes when stopped",
+    async (phase) => {
+      vi.useFakeTimers();
+      const loadStarted = createDeferredCore();
+      const replacementEntered = createDeferredCore();
+      const heldSnapshot = createDeferredCore<ControlUiSessionPullRequests>();
+      let blockLoads = phase === "initial hydration";
+      const load = vi.fn(async ({ sessionKey }: ControlUiSessionPullRequestsParams) => {
+        if (sessionKey === "barrier") {
+          replacementEntered.resolve();
+          return READY;
+        }
+        if (!blockLoads) {
+          return READY;
+        }
+        loadStarted.resolve();
+        return await heldSnapshot.promise;
+      });
+      const broadcastToConnIds = vi.fn();
+      const subscriptions = createControlUiSessionPullRequestSubscriptions({
+        broadcastToConnIds,
+        load,
+      });
+      active = subscriptions;
+      const operations: Promise<unknown>[] = [];
+      try {
+        if (phase === "poll") {
+          await subscriptions.replace("conn-a", ["session"]);
+          load.mockClear();
+          broadcastToConnIds.mockClear();
+          blockLoads = true;
+        }
+        operations.push(
+          phase === "initial hydration"
+            ? subscriptions.replace("conn-a", ["session"])
+            : subscriptions.pollNow(),
+        );
+        await loadStarted.promise;
+        operations.push(
+          subscriptions.replace("conn-a", ["session", "barrier"], new Set(["session"])),
+        );
+        // The second key proves the replacement entered its load queue while the first is held.
+        await replacementEntered.promise;
+        let stopCompletions = 0;
+        for (const stopped of [subscriptions.stop(), subscriptions.stop()]) {
+          operations.push(Promise.resolve(stopped).then(() => stopCompletions++));
+        }
+        await subscriptions.replace("conn-late", ["late"]);
+        await subscriptions.pollNow();
+        await vi.advanceTimersByTimeAsync(60_000);
+        const completedBeforeRelease = stopCompletions;
+        heldSnapshot.resolve(READY);
+        await Promise.all(operations);
+
+        expect({
+          completedBeforeRelease,
+          stopCompletions,
+          loads: load.mock.calls.map(([params]) => params),
+          broadcasts: broadcastToConnIds.mock.calls.length,
+        }).toEqual({
+          completedBeforeRelease: 0,
+          stopCompletions: 2,
+          loads: [{ sessionKey: "session" }, { sessionKey: "barrier" }],
+          broadcasts: 0,
+        });
+      } finally {
+        heldSnapshot.resolve(READY);
+        await Promise.allSettled(operations);
+        await subscriptions.stop();
+      }
+    },
+  );
 
   it("stops polling keys orphaned by replace-set or disconnect cleanup", async () => {
     vi.useFakeTimers();

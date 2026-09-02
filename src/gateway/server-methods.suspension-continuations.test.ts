@@ -10,7 +10,8 @@ import {
   tryBeginGatewayRootWorkAdmission,
   tryBeginGatewaySuspendAdmission,
 } from "../process/gateway-work-admission.js";
-import { ExecApprovalManager } from "./exec-approval-manager.js";
+import type { ExecApprovalManager } from "./exec-approval-manager.js";
+import { createTestApprovalManager } from "./exec-approval-manager.test-support.js";
 import { createPluginGatewayMethodDescriptor } from "./methods/descriptor.js";
 import { createGatewayMethodRegistry } from "./methods/registry.js";
 import { createNodeRegistryRuntime, updateNodeRunnerInventory } from "./node-registry-private.js";
@@ -22,7 +23,14 @@ import { handleNodeInvokeResult } from "./server-methods/nodes.handlers.invoke-r
 import type { GatewayRequestContext, GatewayRequestHandler } from "./server-methods/types.js";
 import type { GatewayWsClient } from "./server/ws-types.js";
 
-afterEach(resetGatewayWorkAdmission);
+const managerCleanups: Array<() => void | Promise<void>> = [];
+afterEach(async () => {
+  try {
+    await Promise.all(managerCleanups.splice(0).map(async (close) => await close()));
+  } finally {
+    resetGatewayWorkAdmission();
+  }
+});
 
 const completionDrainModes = ["suspension", "restart signal", "restart drain"] as const;
 
@@ -207,10 +215,11 @@ function resultRequest(invokeId: string) {
 }
 
 describe("draining Gateway completion ownership", () => {
-  it.each(["exec.approval.resolve", "approval.resolve"] as const)(
+  it.for(["exec.approval.resolve", "approval.resolve"] as const)(
     "admits only an exact live approval continuation through %s",
-    async (method) => {
-      const manager = new ExecApprovalManager();
+    async (method, testContext) => {
+      const manager = createTestApprovalManager(testContext);
+      managerCleanups.push(() => manager.drain());
       const client = createClient("operator");
       const context = createContext({ execApprovalManager: manager });
       const ownerReady = deferred();
@@ -266,6 +275,7 @@ describe("draining Gateway completion ownership", () => {
 
   it("admits exact question inspection and resolution without admitting unrelated roots", async () => {
     const manager = new QuestionManager();
+    managerCleanups.push(() => manager.close());
     const client = createClient("operator");
     const context = createContext({ questionManager: manager });
     const root = tryBeginGatewayRootWorkAdmission();
@@ -335,7 +345,6 @@ describe("draining Gateway completion ownership", () => {
     expect(manager.get("question-owned")).toMatchObject({ status: "answered" });
     expect(getActiveGatewayRootWorkCount()).toBe(0);
     expect(suspension?.release()).toBe(true);
-    manager.reset();
   });
 
   it.each(completionDrainModes)(

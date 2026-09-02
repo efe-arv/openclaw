@@ -19,6 +19,7 @@ import { resetPluginRuntimeStateForTest } from "../../plugins/runtime.js";
 import { resetGatewayWorkAdmission } from "../../process/gateway-work-admission.js";
 import { createWorkerComputerTool } from "../../worker/computer-runtime.js";
 import { WorkerConnection } from "../../worker/worker-connection.js";
+import { GatewayConnectionWork } from "../server-connection-work.js";
 import {
   attachWorkerWsMessageHandler,
   type WorkerConnectionService,
@@ -111,6 +112,7 @@ describe("worker computer connection lifetime", () => {
           return { ok: true, result: { resultJson: "{}" } };
         },
       };
+      const connectionWork = new GatewayConnectionWork();
       const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
       await once(server, "listening");
       const address = server.address();
@@ -122,6 +124,7 @@ describe("worker computer connection lifetime", () => {
         let closed = false;
         const cleanup = attachWorkerWsMessageHandler({
           socket,
+          connectionWork,
           connId: "fixture-connection",
           service: serverService,
           publicAdmission: { clientIp: "127.0.0.1", rateLimiter: undefined },
@@ -277,6 +280,8 @@ describe("worker computer connection lifetime", () => {
         for (const socket of server.clients) {
           socket.terminate();
         }
+        connectionWork.beginClose();
+        await connectionWork.drain();
         await new Promise<void>((resolve, reject) => {
           server.close((error) => (error ? reject(error) : resolve()));
         });

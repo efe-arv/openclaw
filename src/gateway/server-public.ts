@@ -13,6 +13,7 @@ export type GatewayCloseOptions = {
 export type GatewayServer = {
   /** Process-local endpoint used by OpenClaw-managed Tailscale proxying. */
   getTailscaleIngressEndpoint: () => GatewayTailscaleIngressEndpoint | undefined;
+  /** Fences WebSocket ingress and joins received work and connection cleanup before disposal. */
   close: (opts?: GatewayCloseOptions) => Promise<void>;
   /**
    * Resolves when this generation finishes mandatory sidecar startup and rejects on failure.

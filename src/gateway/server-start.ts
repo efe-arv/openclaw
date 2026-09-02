@@ -107,35 +107,47 @@ export async function startGatewayServerCore(
   postReadyWorkTimer.unref?.();
 
   const close = createCloseHandler();
+  let closePromise: Promise<void> | undefined;
 
   return {
     startupSettled,
     getTailscaleIngressEndpoint: gatewayKernel.transportBridge.getTailscaleIngressEndpoint,
-    close: async (optsLocal) => {
-      await runGatewayShutdownSteps({
-        steps: [
-          { name: "close prelude fence", run: beginClosePrelude },
-          // Kill any live operator shells before the socket layer tears down.
-          { name: "terminal sessions", run: () => terminalSessions.disposeAll() },
-          { name: "gateway lifetime sidecars", run: stopRegisteredGatewayLifetimeSidecars },
-          { name: "post-ready sidecars", run: stopRegisteredPostReadySidecars },
-          {
-            name: "gateway_stop plugin hooks",
-            run: async () => {
-              await shutdownRuntime.runGlobalGatewayStopSafely({
-                event: { reason: optsLocal?.reason ?? "gateway stopping" },
-                ctx: { port },
-                onError: (error) =>
-                  log.warn(`gateway_stop hook failed: ${formatErrorMessage(error)}`),
-              });
-            },
-          },
-          { name: "gateway close prelude", run: runClosePrelude },
-          { name: "late sidecar cleanup", run: sealAndJoinRegisteredSidecarStops },
-          { name: "gateway close", run: () => close(optsLocal) },
-        ],
-        onError: (message) => log.error(message),
-      });
+    close: (optsLocal) => {
+      if (!closePromise) {
+        const prelude = beginClosePrelude(optsLocal);
+        clearTimeout(postReadyWorkTimer);
+        releasePostReadyWork();
+        closePromise = (async () => {
+          // Required joins are outside best-effort teardown: failure retains the
+          // runtime rather than releasing dependencies beneath surviving work.
+          await prelude;
+          await gatewayKernel.connectionWork.drain();
+          await runGatewayShutdownSteps({
+            steps: [
+              { name: "startup settlement", run: () => startupSettled },
+              { name: "terminal sessions", run: () => terminalSessions.disposeAll() },
+              { name: "gateway lifetime sidecars", run: stopRegisteredGatewayLifetimeSidecars },
+              { name: "post-ready sidecars", run: stopRegisteredPostReadySidecars },
+              {
+                name: "gateway_stop plugin hooks",
+                run: async () => {
+                  await shutdownRuntime.runGlobalGatewayStopSafely({
+                    event: { reason: optsLocal?.reason ?? "gateway stopping" },
+                    ctx: { port },
+                    onError: (error) =>
+                      log.warn(`gateway_stop hook failed: ${formatErrorMessage(error)}`),
+                  });
+                },
+              },
+              { name: "gateway close prelude", run: runClosePrelude },
+              { name: "late sidecar cleanup", run: sealAndJoinRegisteredSidecarStops },
+              { name: "gateway close", run: () => close(optsLocal) },
+            ],
+            onError: (message) => log.error(message),
+          });
+        })();
+      }
+      return closePromise;
     },
   };
 }

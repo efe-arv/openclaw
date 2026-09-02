@@ -314,7 +314,8 @@ export async function startGatewayCoreRuntime(input: {
     placementStandingGrants,
     systemAgentApprovalManager,
     bindApprovalPublicationContext,
-    unregisterApprovalAuthorityObserver,
+    beginCloseApprovalObservers,
+    stopOperatorInteractions,
     extraHandlers,
     coreGatewayHandlers,
   } = await startupTrace.measure("gateway.handlers", async () => {
@@ -358,9 +359,15 @@ export async function startGatewayCoreRuntime(input: {
       coreGatewayHandlers: coreGatewayHandlersLocal,
     };
   });
+  const requestLifetime = runtime.connectionWork.signal;
+  requestLifetime.addEventListener("abort", beginCloseApprovalObservers, { once: true });
+  if (requestLifetime.aborted) {
+    beginCloseApprovalObservers();
+  }
   kernel.addGatewayLifetimeSidecar({
     stop: async () => {
-      unregisterApprovalAuthorityObserver();
+      requestLifetime.removeEventListener("abort", beginCloseApprovalObservers);
+      await stopOperatorInteractions();
     },
   });
   approvalManagersForReplay.set("exec", execApprovalManager);

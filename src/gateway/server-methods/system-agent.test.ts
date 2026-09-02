@@ -42,7 +42,7 @@ import type {
 } from "../../system-agent/verified-inference.js";
 import type { WizardPrompter } from "../../wizard/prompts.js";
 import type { WizardSession } from "../../wizard/session.js";
-import { ExecApprovalManager } from "../exec-approval-manager.js";
+import { createTestApprovalManager } from "../exec-approval-manager.test-support.js";
 import { handleGatewayRequest } from "../server-methods.js";
 import { runExclusiveSystemAgentSetupActivation } from "./setup-admission.js";
 import { systemAgentHandlers, type SystemAgentChatSession } from "./system-agent.js";
@@ -889,7 +889,7 @@ describe("openclaw.chat", () => {
     expect((await invoke({ limit: 501 }))?.ok).toBe(false);
   });
 
-  it("tracks approved delegated Gateway restarts until their completion drains", async () => {
+  it("tracks approved delegated Gateway restarts until their completion drains", async (testContext) => {
     const approvalStarted = createDeferred();
     const releaseApproval = createDeferred();
     const stateDir = systemAgentTempDirs.make("openclaw-approved-gateway-restart-");
@@ -921,7 +921,7 @@ describe("openclaw.chat", () => {
       ownerKey: JSON.stringify(["main", "agent:main:main"]),
     });
     const sessions = new Map<string, SystemAgentChatSession>([["delegate-1", delegatedSession]]);
-    const manager = new ExecApprovalManager<SystemAgentApprovalRequestPayload>({
+    const manager = createTestApprovalManager<SystemAgentApprovalRequestPayload>(testContext, {
       approvalKind: "system-agent",
       resolveAllowedDecisions: (request) => request.allowedDecisions,
       validateAgentRuntimeDelegatedAuthority: validateAgentRunDelegatedAuthority,

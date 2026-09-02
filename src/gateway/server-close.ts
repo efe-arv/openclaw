@@ -2,7 +2,6 @@
 // Coordinates hooks, drains, sockets, sidecars, plugins, and runtime cleanup.
 import type { Server as HttpServer } from "node:http";
 import { cleanupSessionResources } from "@openclaw/ai/internal/runtime";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { WebSocketServer } from "ws";
 import { getAcpSessionManager } from "../acp/control-plane/manager.js";
 import { disposeAcpSessionManagerInstance } from "../acp/control-plane/manager.lifecycle.js";
@@ -36,15 +35,16 @@ import {
   type ChatRunEntry,
   type ChatRunState,
 } from "./server-chat-state.js";
+import { WEBSOCKET_CLOSE_GRACE_MS } from "./server-constants.js";
 import type { MediaCleanupStopResult } from "./server-media-cleanup-lifecycle.js";
 import { clearSessionTypingState } from "./server-methods/session-typing-state.js";
 import type { GatewayMaintenanceHandles } from "./server-runtime-services.js";
+import { resolveGatewayShutdownNotice } from "./server-shutdown.js";
 
 const shutdownLog = createSubsystemLogger("gateway/shutdown");
 const GATEWAY_SHUTDOWN_HOOK_TIMEOUT_MS = 5_000;
 const GATEWAY_PRE_RESTART_HOOK_TIMEOUT_MS = 10_000;
 const ACTIVE_SESSIONS_SHUTDOWN_DRAIN_TIMEOUT_MS = 2_000;
-const WEBSOCKET_CLOSE_GRACE_MS = 1_000;
 const WEBSOCKET_CLOSE_FORCE_CONTINUE_MS = 250;
 const HTTP_CLOSE_GRACE_MS = 1_000;
 const HTTP_CLOSE_FORCE_WAIT_MS = 5_000;
@@ -714,12 +714,9 @@ export function createGatewayCloseHandler(
   }): Promise<ShutdownResult> => {
     const start = Date.now();
     const warnings: string[] = [];
-    const reasonRaw = normalizeOptionalString(opts?.reason) ?? "";
-    const reason = reasonRaw || "gateway stopping";
-    const restartExpectedMs =
-      typeof opts?.restartExpectedMs === "number" && Number.isFinite(opts.restartExpectedMs)
-        ? Math.max(0, Math.floor(opts.restartExpectedMs))
-        : null;
+    const notice = resolveGatewayShutdownNotice(opts);
+    const { reason } = notice;
+    const restartExpectedMs = notice.restartExpectedMs ?? null;
     const measureCloseStep = <T>(name: string, run: () => Promise<T> | T) =>
       measureGatewayRestartTrace(`restart.close.${name}`, run, [["reason", reason]]);
     try {
@@ -925,12 +922,6 @@ export function createGatewayCloseHandler(
         clearInterval(timer);
       }
       params.nodePresenceTimers.clear();
-      // Omit rather than null: ShutdownEventSchema declares an optional integer,
-      // and clients key the restart presentation on the field's presence.
-      params.broadcast("shutdown", {
-        reason,
-        ...(restartExpectedMs === null ? {} : { restartExpectedMs }),
-      });
       if (params.maintenance) {
         clearInterval(params.maintenance.tickInterval);
         clearInterval(params.maintenance.healthInterval);

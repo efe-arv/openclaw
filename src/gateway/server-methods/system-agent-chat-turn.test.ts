@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { SystemAgentApprovalRequestPayload } from "../../infra/system-agent-approvals.js";
-import { ExecApprovalManager } from "../exec-approval-manager.js";
+import { createTestApprovalManager } from "../exec-approval-manager.test-support.js";
 import {
   buildDelegatedApprovalPendingReply,
   buildSystemAgentChatResult,
@@ -142,8 +142,8 @@ describe("system-agent chat input", () => {
     });
   });
 
-  it("omits the delegated approval link when the Control UI is disabled", async () => {
-    const manager = new ExecApprovalManager<SystemAgentApprovalRequestPayload>({
+  it("omits the delegated approval link when the Control UI is disabled", async (testContext) => {
+    const manager = createTestApprovalManager<SystemAgentApprovalRequestPayload>(testContext, {
       approvalKind: "system-agent",
       resolveAllowedDecisions: (request) => request.allowedDecisions,
     });

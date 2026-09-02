@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { setImmediate as nextTurn } from "node:timers/promises";
 import { describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import type { ChannelPlugin } from "../channels/plugins/types.public.js";
@@ -19,6 +20,7 @@ import { CLI_DEFAULT_OPERATOR_SCOPES } from "./method-scopes.js";
 import { dispatchGatewayRequestInProcess } from "./server-in-process-dispatch.js";
 import { createGatewayKernel } from "./server-kernel.js";
 import { createSyntheticPluginRuntimeClient } from "./server-plugin-runtime-client.js";
+import type { GatewayServer } from "./server-public.js";
 
 describe("createGatewayKernel", () => {
   it("does not start recovered channels after close prelude begins", async () => {
@@ -122,66 +124,145 @@ describe("createGatewayKernel", () => {
     }
   });
 
-  it("reports startup and readiness as draining during a direct close", async () => {
-    const port = 19_789;
-    const state = await createOpenClawTestState({
-      label: "gateway-kernel-direct-close-readiness",
-      layout: "home",
-      env: {
-        OPENCLAW_GATEWAY_PASSWORD: undefined,
-        OPENCLAW_GATEWAY_TOKEN: undefined,
-        OPENCLAW_SKIP_BROWSER_CONTROL_SERVER: "1",
-        OPENCLAW_SKIP_CANVAS_HOST: "1",
-        OPENCLAW_SKIP_CHANNELS: "1",
-        OPENCLAW_SKIP_CRON: "1",
-        OPENCLAW_SKIP_GMAIL_WATCHER: "1",
-        OPENCLAW_SKIP_PROVIDERS: "1",
-        OPENCLAW_TEST_MINIMAL_GATEWAY: "1",
-        VITEST: "1",
-      },
-    });
-    const token = "gateway-kernel-direct-close-readiness-token";
-    const configReloaderStop = createDeferred();
-    let kernel: Awaited<ReturnType<typeof createGatewayKernel>> | undefined;
-    try {
-      await state.writeConfig({
-        gateway: { auth: { mode: "token", token }, controlUi: { enabled: false }, port },
+  it.for(["direct", "public"] as const)(
+    "reports draining and joins shutdown owners during %s close",
+    async (entry, { signal }) => {
+      const port = await getFreePort();
+      const state = await createOpenClawTestState({
+        label: `gateway-kernel-${entry}-close-readiness`,
+        layout: "home",
+        env: {
+          OPENCLAW_GATEWAY_PASSWORD: undefined,
+          OPENCLAW_GATEWAY_TOKEN: undefined,
+          OPENCLAW_SKIP_BROWSER_CONTROL_SERVER: "1",
+          OPENCLAW_SKIP_CANVAS_HOST: "1",
+          OPENCLAW_SKIP_CHANNELS: "1",
+          OPENCLAW_SKIP_CRON: "1",
+          OPENCLAW_SKIP_GMAIL_WATCHER: "1",
+          OPENCLAW_SKIP_PROVIDERS: "1",
+          OPENCLAW_TEST_MINIMAL_GATEWAY: "1",
+          VITEST: "1",
+        },
       });
-      state.applyEnv();
-      kernel = await createGatewayKernel(port, {
-        auth: { mode: "token", token },
-        bind: "loopback",
-        controlUiEnabled: false,
-        sidecarStartup: "defer",
-      });
-      kernel.kernel.unlockStartupMethods();
-      kernel.kernel.markSidecarsReady();
-      const { getStartup, getReadiness } = kernel.createHttpTransportOptions();
-      expect(getStartup()).toMatchObject({ ok: true, status: "started" });
-      expect(getReadiness()).toMatchObject({ ready: true, failing: [] });
-
-      const closeFirstStop = vi.fn(async () => {});
-      kernel.kernel.swapBonjourStop(closeFirstStop);
-      vi.spyOn(kernel.runtimeState.configReloader, "stop").mockReturnValue(
-        configReloaderStop.promise,
-      );
-      const closing = kernel.createCloseHandler()({ reason: "direct close readiness test" });
-
-      expect(getStartup()).toMatchObject({ ok: false, status: "draining" });
-      expect(getReadiness()).toMatchObject({ ready: false, failing: ["gateway-draining"] });
-      configReloaderStop.resolve();
-      await closing;
-      expect(closeFirstStop).toHaveBeenCalledOnce();
-      expect(kernel.runtimeState.bonjourStop).toBeNull();
-    } finally {
-      configReloaderStop.resolve();
+      const token = "gateway-kernel-close-readiness-token";
+      const configReloaderStop = createDeferred();
+      const recoveryStop = createDeferred();
+      const reloadSettled = vi.fn(() => {});
+      const recoverySettled = vi.fn(() => {});
+      const reloadWork = configReloaderStop.promise.then(reloadSettled);
+      const recoveryWork = recoveryStop.promise.then(recoverySettled);
+      const release = () => {
+        configReloaderStop.resolve();
+        recoveryStop.resolve();
+      };
+      signal.addEventListener("abort", release, { once: true });
+      let kernel: Awaited<ReturnType<typeof createGatewayKernel>> | undefined;
+      let server: GatewayServer | undefined;
+      let closing: Promise<void> | undefined;
+      let maintenanceTimer: ReturnType<typeof setTimeout> | undefined;
+      const createKernel = createGatewayKernel;
+      // Capture the actual owner; public startup, prelude, and teardown remain real.
+      const factory = vi
+        .spyOn(await import("./server-kernel.js"), "createGatewayKernel")
+        .mockImplementation(async (...args) => {
+          kernel = await createKernel(...args);
+          return kernel;
+        });
       try {
-        await kernel?.closeOnStartupFailure();
+        await state.writeConfig({
+          gateway: { auth: { mode: "token", token }, controlUi: { enabled: false }, port },
+        });
+        state.applyEnv();
+        const options = {
+          auth: { mode: "token" as const, token },
+          bind: "loopback" as const,
+          controlUiEnabled: false,
+          sidecarStartup: "defer" as const,
+        };
+        if (entry === "public") {
+          const { startGatewayServerCore } = await import("./server-start.js");
+          server = await startGatewayServerCore(port, options);
+          await server.startupSettled;
+        } else {
+          kernel = await createGatewayKernel(port, options);
+          kernel.kernel.unlockStartupMethods();
+          kernel.kernel.markSidecarsReady();
+        }
+        if (!kernel) {
+          throw new Error("Expected the real Gateway kernel to be captured");
+        }
+        const { getStartup, getReadiness } = kernel.createHttpTransportOptions();
+        expect(getStartup()).toMatchObject({ ok: true, status: "started" });
+        expect(getReadiness()).toMatchObject({ ready: true, failing: [] });
+
+        const closeFirstStop = vi.fn(async () => {});
+        kernel.kernel.swapBonjourStop(closeFirstStop);
+        const reloadStop = vi
+          .spyOn(kernel.runtimeState.configReloader, "stop")
+          .mockReturnValue(reloadWork);
+        const stopRecovery = vi.fn(() => recoveryWork);
+        kernel.kernel.setScheduledServiceHandles({
+          heartbeatRunner: kernel.runtimeState.heartbeatRunner,
+          stopOutboundDeliveryRecovery: stopRecovery,
+        });
+        const terminalDispose = vi.spyOn(kernel.terminalSessions, "disposeAll");
+        const gatewayStop = vi.spyOn(kernel.shutdownRuntime, "runGlobalGatewayStopSafely");
+        const invalidateCron = vi.spyOn(kernel.cronReconciliation, "invalidate");
+        const startMaintenance = vi.fn(() => {});
+        maintenanceTimer = setTimeout(startMaintenance, 0);
+        kernel.postReadyState.maintenanceTimer = maintenanceTimer;
+        closing = server
+          ? server.close({ reason: "close ordering test" })
+          : kernel.createCloseHandler()({ reason: "close ordering test" });
+
+        expect(getStartup()).toMatchObject({ ok: false, status: "draining" });
+        expect(getReadiness()).toMatchObject({ ready: false, failing: ["gateway-draining"] });
+        expect(kernel.postReadyState.maintenanceTimer).toBeNull();
+        expect(invalidateCron).toHaveBeenCalledOnce();
+        expect(stopRecovery).toHaveBeenCalledOnce();
+        await nextTurn();
+        expect(startMaintenance).not.toHaveBeenCalled();
+        expect(reloadStop).toHaveBeenCalledOnce();
+        expect(terminalDispose).not.toHaveBeenCalled();
+        expect(gatewayStop).not.toHaveBeenCalled();
+        configReloaderStop.resolve();
+        await nextTurn();
+        expect(reloadSettled).toHaveBeenCalledOnce();
+        if (server) {
+          // Finishing reload alone must not bypass the other admitted producer.
+          expect(terminalDispose).not.toHaveBeenCalled();
+          expect(gatewayStop).not.toHaveBeenCalled();
+        }
+        recoveryStop.resolve();
+        await closing;
+        expect(closeFirstStop).toHaveBeenCalledOnce();
+        expect(kernel.runtimeState.bonjourStop).toBeNull();
+        if (server) {
+          expect(terminalDispose).toHaveBeenCalledOnce();
+          expect(gatewayStop).toHaveBeenCalledOnce();
+          for (const settled of [reloadSettled, recoverySettled]) {
+            expect(settled).toHaveBeenCalledBefore(terminalDispose);
+            expect(settled).toHaveBeenCalledBefore(gatewayStop);
+          }
+        }
       } finally {
-        await state.cleanup();
+        release();
+        clearTimeout(maintenanceTimer);
+        try {
+          await Promise.all([closing, reloadWork, recoveryWork]);
+        } finally {
+          try {
+            await (server?.close() ?? kernel?.closeOnStartupFailure());
+          } finally {
+            factory.mockRestore();
+            vi.restoreAllMocks();
+            signal.removeEventListener("abort", release);
+            await state.cleanup();
+          }
+        }
       }
-    }
-  });
+    },
+  );
 
   it("keeps startup readiness and sidecar shutdown at their lifecycle boundaries", async () => {
     const port = await getFreePort();
@@ -347,7 +428,9 @@ describe("createGatewayKernel", () => {
       const successfulPeer = { stop: vi.fn(async () => {}) };
       kernel.kernel.setGatewayLifetimeSidecars([persistentSidecar, successfulPeer]);
 
-      await expect(kernel.closeOnStartupFailure()).resolves.toBeUndefined();
+      await expect(kernel.closeOnStartupFailure()).rejects.toMatchObject({
+        errors: [{ cause: persistentError }],
+      });
       expect(persistentStop).toHaveBeenCalledTimes(2);
       expect(successfulPeer.stop).toHaveBeenCalledOnce();
       expect(kernel.runtimeState.gatewayLifetimeSidecars).toEqual([persistentSidecar]);

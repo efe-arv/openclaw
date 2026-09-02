@@ -97,7 +97,7 @@ export function createUiE2eVitestConfig(
     ...base,
     cacheDir: ".artifacts/vite-ui-e2e",
     test: {
-      ...baseTest,
+      ...projectTest,
       exclude,
       // One root-owned build supplies the inherited URL to both named projects.
       globalSetup: ["test/vitest/vitest.ui-e2e.global-setup.ts"],

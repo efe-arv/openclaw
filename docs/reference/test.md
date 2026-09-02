@@ -413,6 +413,13 @@ and intentionally real-home live execution remain outside its protection.
 - `test/helpers/openclaw-test-instance.ts`: process-level E2E tests needing a running Gateway, CLI env, log capture, and cleanup in one place.
 - Docker/Bash E2E lanes that source `scripts/lib/docker-e2e-image.sh` can pass `docker_e2e_test_state_shell_b64 <label> <scenario>` into the container and decode it with `scripts/lib/openclaw-e2e-instance.sh`; multi-home scripts can pass `docker_e2e_test_state_function_b64` and call `openclaw_test_state_create <label> <scenario>` in each flow. `node --import tsx scripts/lib/openclaw-test-state.mts -- create --label <name> --scenario <name> --env-file <path> --json` writes a sourceable host env file (the `--` before `create` keeps newer Node runtimes from treating `--env-file` as a Node flag). Lanes that launch a Gateway can source `scripts/lib/openclaw-e2e-instance.sh` for entrypoint resolution, mock OpenAI startup, foreground/background launch, readiness probes, state env export, log dumps, and process cleanup.
 
+`createOpenClawTestState` selects and owns temporary paths and process environment
+selectors. It is not filesystem sandboxing and does not stop external producers.
+Await its asynchronous `restoreEnv()`; stop and join required producers before
+restoring selectors or removing state. Runtime reproductions of state-selection
+leaks require enforced storage isolation, such as a VM or container without access
+to operator stores, not merely temporary `HOME` or state-directory overrides.
+
 ## Control UI, TUI, and extension lanes
 
 - **Control UI mocked E2E:** `pnpm test:ui:e2e` runs the Vitest + Playwright lane that starts the Vite Control UI and drives a real Chromium page against a mocked Gateway WebSocket. Tests live in `ui/src/**/*.e2e.test.ts`; shared mocks/controls live in `ui/src/test-helpers/control-ui-e2e.ts`. `pnpm test:e2e` includes this lane. Use Testbox/Crabbox only when clean Linux/browser parity is part of the proof. In a linked worktree, `node scripts/run-vitest.mjs run --config test/vitest/vitest.ui-e2e.config.ts --configLoader runner ui/src/e2e/chat-flow.messaging.e2e.test.ts` avoids pnpm dependency reconciliation for a targeted local run.
@@ -425,6 +432,39 @@ and intentionally real-home live execution remain outside its protection.
 - Selected `plugin-sdk` and `commands` test files route through dedicated light lanes that keep only `test/setup.ts`, leaving runtime-heavy cases on their existing lanes.
 - Base Vitest config defaults to `pool: "threads"` and `isolate: false`, with the shared non-isolated runner enabled across repo configs.
 - `pnpm test:channels` runs `vitest.channels.config.ts`.
+
+### Real-Gateway Control UI fixture lifetimes
+
+Use `createControlUiE2eSuite` from
+`ui/src/e2e/control-ui-e2e-suite.test-support.ts` for real-Gateway browser fixtures.
+`suite.define(...)` owns the native hooks. Each native `it` passes its test context
+to `suite.runScenario(context, ...)`, which owns acquisition, the test body, and
+finalization before another case starts. Acquire and close browser contexts through
+`suite.newBrowserContext` and `suite.closeBrowserContext` so late acquisitions and
+pending closes remain owned.
+
+Retain test state immediately after `createOpenClawTestState` resolves, including
+when later config writes, imports, or startup fail. Hold original startup promises,
+not just their timeout wrappers. Close required producers before releasing state.
+For producers shared across cases, as in the MCP and auth suites, use the suite's
+`resources.run`, `resources.close`, and `resources.release` callbacks instead of
+independent `beforeAll`/`afterAll` cleanup. Resource acquisition follows shared
+server/browser acquisition; teardown joins cases and browser cleanup, closes
+required producers and servers, and releases state only after those closes succeed.
+
+Failed or unjoined cleanup retains selectors and state, blocks later cases using
+this suite owner, and leaves native Vitest to terminate and join the isolated fork. Do not
+swallow close failures or restore the environment beneath unfinished work. The
+lifetime owner preserves existing hook, test, and action budgets.
+
+Gateway close joins received WebSocket work and asynchronous connection cleanup,
+including cooperating background refreshes registered at their producer with
+`trackAsyncWork`. Register the actual operation, not just its response or timeout
+wrapper; cache eviction does not end its lifetime. `withOpenClawTestState` likewise
+joins registered callback descendants before releasing state. These scopes do not
+automatically track arbitrary detached work or replace native test-timeout ownership.
+Other Gateway subsystems can retain documented bounded shutdown behavior, so close
+is not a guarantee of universal subsystem or descendant-process quiescence.
 
 ### Retained mocked Control UI proof
 

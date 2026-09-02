@@ -1,5 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
-import { runGatewayShutdownSteps } from "./server-shutdown.js";
+import { resolveGatewayShutdownNotice, runGatewayShutdownSteps } from "./server-shutdown.js";
+
+describe("gateway shutdown notice", () => {
+  it("omits invalid restart metadata and normalizes the reason", () => {
+    expect(
+      resolveGatewayShutdownNotice({ reason: "  upgrade  ", restartExpectedMs: Number.NaN }),
+    ).toEqual({
+      reason: "upgrade",
+    });
+    expect(resolveGatewayShutdownNotice({ restartExpectedMs: -2 })).toEqual({
+      reason: "gateway stopping",
+      restartExpectedMs: 0,
+    });
+  });
+});
 
 describe("gateway shutdown steps", () => {
   it("names an unavailable module step and continues the remaining shutdown", async () => {
@@ -12,12 +26,17 @@ describe("gateway shutdown steps", () => {
     const closeGateway = vi.fn(async () => {});
     const messages: string[] = [];
 
-    await runGatewayShutdownSteps({
-      steps: [
-        { name: "gateway lifetime sidecars", run: loadStopModule },
-        { name: "gateway close", run: closeGateway },
-      ],
-      onError: (message) => messages.push(message),
+    await expect(
+      runGatewayShutdownSteps({
+        steps: [
+          { name: "gateway lifetime sidecars", run: loadStopModule },
+          { name: "gateway close", run: closeGateway },
+        ],
+        onError: (message) => messages.push(message),
+      }),
+    ).rejects.toMatchObject({
+      message: "Gateway shutdown did not complete cleanly",
+      errors: [expect.objectContaining({ cause: missingModule })],
     });
 
     expect(closeGateway).toHaveBeenCalledOnce();

@@ -284,7 +284,7 @@ export function createGatewayAuthenticatedRequestDispatcher(params: {
       });
       deviceCredentialMutationBarrier = barrier;
     }
-    void requestDispatch;
+    await requestDispatch;
   };
 
   return { dispatch };

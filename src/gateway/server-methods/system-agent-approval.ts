@@ -17,6 +17,7 @@ import { KeyedAsyncQueue } from "../../plugin-sdk/keyed-async-queue.js";
 import { runWithGatewayIndependentRootWorkContinuation } from "../../process/gateway-work-admission.js";
 import { describeSystemAgentPersistentOperation } from "../../system-agent/operations.js";
 import type { AgentRuntimeDelegatedAuthority } from "../agent-runtime-identity-token.js";
+import { ApprovalObserverClosedError } from "../exec-approval-lifecycle.js";
 import { sameWorkerSessionTurnClaim } from "../worker-environments/placement-record.js";
 import {
   broadcastApprovalResolvedEvent,
@@ -145,7 +146,7 @@ export function queueDelegatedApproval(params: {
   if (callerIdentity?.approvalSignals?.length) {
     record.approvalSignals = callerIdentity.approvalSignals;
   }
-  const decisionPromise = manager.register(record, SYSTEM_AGENT_APPROVAL_TIMEOUT_MS);
+  void manager.register(record, SYSTEM_AGENT_APPROVAL_TIMEOUT_MS);
   params.session.pendingApproval = { id: record.id, proposalHash: params.proposal.hash };
   const requestEvent = buildRequestedApprovalEvent(record, "system-agent");
   const publishApplicationResult = (
@@ -171,7 +172,6 @@ export function queueDelegatedApproval(params: {
   void handlePendingApprovalRequest({
     manager,
     record,
-    decisionPromise,
     respond: () => undefined,
     context: params.context,
     requestEventName: "openclaw.approval.requested",
@@ -219,6 +219,10 @@ export function queueDelegatedApproval(params: {
       }
     },
     afterDecisionErrorLabel: "OpenClaw approval apply failed",
+  }).catch((error: unknown) => {
+    if (!(error instanceof ApprovalObserverClosedError)) {
+      params.context.logGateway.error(`OpenClaw approval wait failed: ${String(error)}`);
+    }
   });
   return record.id;
 }
