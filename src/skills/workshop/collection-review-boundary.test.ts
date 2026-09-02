@@ -88,7 +88,9 @@ describe("skill collection review boundary", () => {
       });
 
       expect(result.status).toBe("error");
-      expect(result.error).toContain("unsafe");
+      expect(result.error).toBe(
+        "Skill collection review completed with errors: security scan rejected unsafe",
+      );
       expect(getSkillsSnapshotVersion()).toBeGreaterThan(beforeVersion);
       expect(listSkillCollectionReviewOutcomes({ env: testState.env })[0]).toMatchObject({
         kept: ["keep", "unsafe"],

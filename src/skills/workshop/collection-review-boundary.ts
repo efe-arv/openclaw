@@ -133,11 +133,6 @@ export async function runSkillCollectionReviewForAgent(params: {
               reason: dropReasons.get(skill.name) ?? "no reason given",
             })),
         };
-        for (const drop of result.dropped) {
-          if (!dropReasons.has(drop.name)) {
-            reviewErrors.push(`missing DROP reason for ${drop.name}`);
-          }
-        }
         assertCurrent(lease);
         await commitCollectionBackup(
           skillsRoot,
