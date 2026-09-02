@@ -278,13 +278,19 @@ describe("Models auth params schemas", () => {
     expectRejected(ModelsAuthLogoutParamsSchema, { provider: "openai", profileIds: [] });
     expectAccepted(
       ModelsAuthOrderSetParamsSchema,
-      { provider: "openai", profileIds: ["openai:writer"] },
-      { provider: "openai", agentId: "writer" },
+      {
+        provider: "openai",
+        profileIds: ["openai:writer"],
+        expectedProfileIds: ["openai:reader", "openai:writer"],
+      },
+      { provider: "openai", expectedProfileIds: [], agentId: "writer" },
     );
     expectRejected(
       ModelsAuthOrderSetParamsSchema,
-      { provider: "openai", profileIds: [] },
-      { provider: "openai", profileIds: null },
+      { provider: "openai", profileIds: [], expectedProfileIds: [] },
+      { provider: "openai", profileIds: null, expectedProfileIds: [] },
+      { provider: "openai" },
+      { provider: "openai", expectedProfileIds: null },
     );
   });
 });

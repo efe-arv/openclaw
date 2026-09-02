@@ -316,6 +316,7 @@ export const ModelsAuthLogoutParamsSchema = closedObject({
 export const ModelsAuthOrderSetParamsSchema = closedObject({
   provider: NonEmptyString,
   profileIds: Type.Optional(Type.Array(NonEmptyString, { minItems: 1 })),
+  expectedProfileIds: Type.Array(NonEmptyString),
   agentId: Type.Optional(Type.String()),
 });
 

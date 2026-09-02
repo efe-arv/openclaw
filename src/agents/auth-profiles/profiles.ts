@@ -107,6 +107,7 @@ export async function setAuthProfileOrder(params: {
   inheritedAuthDir?: string;
   provider: string;
   order?: string[] | null;
+  expectedOrder?: readonly string[];
   membershipGuard?: {
     /** Effective provider profiles observed from the prepared runtime owner. */
     effectiveProfileIds: readonly string[];
@@ -119,19 +120,32 @@ export async function setAuthProfileOrder(params: {
   const sanitized =
     params.order && Array.isArray(params.order) ? normalizeStringEntries(params.order) : [];
   const deduped = dedupeProfileIds(sanitized);
+  const expectedOrder =
+    params.expectedOrder === undefined
+      ? undefined
+      : dedupeProfileIds(normalizeStringEntries(params.expectedOrder));
   const expectedProvider = params.membershipGuard
     ? [...new Set(params.membershipGuard.effectiveProfileIds)].toSorted()
     : undefined;
   let expectedPersisted: string[] | undefined;
-  const validateMembership = (inheritedStore: AuthProfileStore, localStore: AuthProfileStore) => {
+  const validatePreparedState = (
+    inheritedStore: AuthProfileStore,
+    localStore: AuthProfileStore,
+  ) => {
+    const currentStore = mergeAuthProfileStores(inheritedStore, localStore, {
+      preserveBaseRuntimeExternalProfiles: true,
+    });
+    if (expectedOrder !== undefined) {
+      const currentOrder =
+        readProviderAuthState(currentStore.order, providerKey, params.authAliasLookupParams) ?? [];
+      if (!isDeepStrictEqual(currentOrder, expectedOrder)) {
+        throw new AuthProfileOrderChangedError();
+      }
+    }
     if (!expectedProvider) {
       return;
     }
-    const currentPersisted = Object.entries(
-      mergeAuthProfileStores(inheritedStore, localStore, {
-        preserveBaseRuntimeExternalProfiles: true,
-      }).profiles,
-    )
+    const currentPersisted = Object.entries(currentStore.profiles)
       .filter(
         ([, credential]) =>
           resolveProviderIdForAuth(credential.provider, params.authAliasLookupParams) ===
@@ -164,11 +178,11 @@ export async function setAuthProfileOrder(params: {
 
   return await updateAuthProfileStoreWithLock({
     agentDir: params.agentDir,
-    ...(expectedProvider
+    ...(expectedProvider || expectedOrder !== undefined
       ? {
           guardStore: {
             ...(params.inheritedAuthDir ? { agentDir: params.inheritedAuthDir } : {}),
-            validate: validateMembership,
+            validate: validatePreparedState,
           },
         }
       : {}),

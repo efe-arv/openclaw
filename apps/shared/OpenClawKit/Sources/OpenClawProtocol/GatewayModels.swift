@@ -15447,21 +15447,25 @@ public struct ModelsAuthLogoutParams: Codable, Sendable {
 public struct ModelsAuthOrderSetParams: Codable, Sendable {
     public let provider: String
     public let profileids: [String]?
+    public let expectedprofileids: [String]
     public let agentid: String?
 
     public init(
         provider: String,
         profileids: [String]? = nil,
+        expectedprofileids: [String],
         agentid: String? = nil)
     {
         self.provider = provider
         self.profileids = profileids
+        self.expectedprofileids = expectedprofileids
         self.agentid = agentid
     }
 
     private enum CodingKeys: String, CodingKey {
         case provider
         case profileids = "profileIds"
+        case expectedprofileids = "expectedProfileIds"
         case agentid = "agentId"
     }
 }

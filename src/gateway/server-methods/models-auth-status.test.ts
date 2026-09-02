@@ -234,9 +234,10 @@ function createOrderOptions(
   params: Record<string, unknown>,
 ): GatewayRequestHandlerOptions & { respond: ReturnType<typeof vi.fn> } {
   const respond = vi.fn();
+  const requestParams = { expectedProfileIds: [], ...params };
   return {
-    req: { type: "req", id: "req-order", method: "models.authOrderSet", params },
-    params,
+    req: { type: "req", id: "req-order", method: "models.authOrderSet", params: requestParams },
+    params: requestParams,
     client: null,
     isWebchatConnect: () => false,
     respond,
@@ -2263,6 +2264,7 @@ describe("models.authOrderSet", () => {
     const opts = createOrderOptions({
       provider: "openai",
       profileIds: ["openai:two", "openai:one"],
+      expectedProfileIds: ["openai:one", "openai:two"],
     });
 
     await orderHandler(opts);
@@ -2271,6 +2273,7 @@ describe("models.authOrderSet", () => {
       agentDir: "/tmp/agent",
       provider: "openai",
       order: ["openai:two", "openai:one"],
+      expectedOrder: ["openai:one", "openai:two"],
       authAliasLookupParams: expect.objectContaining({ includeUntrustedWorkspacePlugins: false }),
       membershipGuard: {
         effectiveProfileIds: ["openai:one", "openai:two"],
@@ -2578,6 +2581,7 @@ describe("models.authOrderSet", () => {
       agentDir: "/tmp/agent",
       provider: "openai",
       order: null,
+      expectedOrder: [],
       authAliasLookupParams: expect.objectContaining({ includeUntrustedWorkspacePlugins: false }),
       membershipGuard: {
         effectiveProfileIds: ["openai:one", "openai:two"],

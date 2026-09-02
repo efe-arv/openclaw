@@ -1941,6 +1941,40 @@ describe("setAuthProfileOrder", () => {
     });
   });
 
+  it("rejects an order when the stored priority changed before the locked write", async () => {
+    await withAuthProfileTestState("openclaw-auth-order-stale-priority-", async ({ agentDir }) => {
+      fs.mkdirSync(agentDir, { recursive: true });
+      saveAuthProfileStore(
+        {
+          version: AUTH_STORE_VERSION,
+          profiles: {
+            "openai:one": { type: "api_key", provider: "openai", key: "one" },
+            "openai:two": { type: "api_key", provider: "openai", key: "two" },
+          },
+          order: { openai: ["openai:two", "openai:one"] },
+        },
+        agentDir,
+      );
+
+      await expect(
+        setAuthProfileOrder({
+          agentDir,
+          provider: "openai",
+          order: ["openai:one", "openai:two"],
+          expectedOrder: ["openai:one", "openai:two"],
+          membershipGuard: {
+            effectiveProfileIds: ["openai:one", "openai:two"],
+            localProfileIds: ["openai:one", "openai:two"],
+          },
+        }),
+      ).rejects.toBeInstanceOf(AuthProfileOrderChangedError);
+      expect(loadPersistedAuthProfileStore(agentDir)?.order?.openai).toEqual([
+        "openai:two",
+        "openai:one",
+      ]);
+    });
+  });
+
   it("accepts a locally persisted OAuth row owned by the inherited main store", async () => {
     await withAuthProfileTestState(
       "openclaw-auth-order-inherited-owner-",

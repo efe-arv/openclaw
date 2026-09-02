@@ -144,19 +144,20 @@ function readProviderParam(params: Record<string, unknown>): string | null {
 
 type LogoutProfileSelection = { ok: true; profileIds?: string[] } | { ok: false; message: string };
 
-function readLogoutProfileSelection(params: Record<string, unknown>): LogoutProfileSelection {
-  if (!("profileIds" in params)) {
-    return { ok: true };
-  }
-  if (!Array.isArray(params.profileIds) || params.profileIds.length === 0) {
-    return { ok: false, message: "profileIds must be a non-empty string array" };
+function readNonEmptyProfileIds(
+  value: unknown,
+  message: string,
+  allowEmpty = false,
+): { ok: true; profileIds: string[] } | { ok: false; message: string } {
+  if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) {
+    return { ok: false, message };
   }
   const profileIds: string[] = [];
-  for (const value of params.profileIds) {
-    if (typeof value !== "string" || !value.trim()) {
-      return { ok: false, message: "profileIds must be a non-empty string array" };
+  for (const entry of value) {
+    if (typeof entry !== "string" || !entry.trim()) {
+      return { ok: false, message };
     }
-    const profileId = value.trim();
+    const profileId = entry.trim();
     if (!profileIds.includes(profileId)) {
       profileIds.push(profileId);
     }
@@ -164,28 +165,41 @@ function readLogoutProfileSelection(params: Record<string, unknown>): LogoutProf
   return { ok: true, profileIds };
 }
 
+function readLogoutProfileSelection(params: Record<string, unknown>): LogoutProfileSelection {
+  if (!("profileIds" in params)) {
+    return { ok: true };
+  }
+  return readNonEmptyProfileIds(params.profileIds, "profileIds must be a non-empty string array");
+}
+
 type OrderProfileSelection =
-  | { ok: true; profileIds: string[] | null }
+  | { ok: true; profileIds: string[] | null; expectedProfileIds: string[] }
   | { ok: false; message: string };
 
 function readOrderProfileSelection(params: Record<string, unknown>): OrderProfileSelection {
-  if (params.profileIds === undefined) {
-    return { ok: true, profileIds: null };
+  const profileIds =
+    params.profileIds === undefined
+      ? null
+      : readNonEmptyProfileIds(
+          params.profileIds,
+          "profileIds must be a non-empty string array when provided",
+        );
+  if (profileIds !== null && !profileIds.ok) {
+    return profileIds;
   }
-  if (!Array.isArray(params.profileIds) || params.profileIds.length === 0) {
-    return { ok: false, message: "profileIds must be a non-empty string array when provided" };
+  const expectedProfileIds = readNonEmptyProfileIds(
+    params.expectedProfileIds,
+    "expectedProfileIds must be a string array",
+    true,
+  );
+  if (!expectedProfileIds.ok) {
+    return expectedProfileIds;
   }
-  const profileIds: string[] = [];
-  for (const value of params.profileIds) {
-    if (typeof value !== "string" || !value.trim()) {
-      return { ok: false, message: "profileIds must be a non-empty string array when provided" };
-    }
-    const profileId = value.trim();
-    if (!profileIds.includes(profileId)) {
-      profileIds.push(profileId);
-    }
-  }
-  return { ok: true, profileIds };
+  return {
+    ok: true,
+    profileIds: profileIds === null ? null : profileIds.profileIds,
+    expectedProfileIds: expectedProfileIds.profileIds,
+  };
 }
 
 function createAuthLogoutAbortOps(context: GatewayRequestContext): ChatAbortOps {
@@ -347,6 +361,7 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
           : {}),
         provider: authProvider,
         order: selection.profileIds,
+        expectedOrder: selection.expectedProfileIds,
         authAliasLookupParams,
         membershipGuard: {
           effectiveProfileIds: availableProfileIds,
