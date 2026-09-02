@@ -1,7 +1,7 @@
 import path from "node:path";
 import type { Browser, Page } from "playwright";
 import { expect } from "vitest";
-import { installMockGateway } from "../test-helpers/control-ui-e2e.ts";
+import { installMockGateway, waitForControlUiRoute } from "../test-helpers/control-ui-e2e.ts";
 
 type SidebarAttentionScopeFlowOptions = {
   artifactDir: string;
@@ -168,6 +168,8 @@ export async function runSidebarAttentionScopeFlow(params: SidebarAttentionScope
       .locator('wa-dropdown.sidebar-agent-menu wa-dropdown-item[value="agent:writer"]')
       .click();
     await waitForCronScope("writer");
+    // The agent switch also navigates to Chat, whose route change dismisses Inbox.
+    await waitForControlUiRoute(page, { pathname: "/chat/writer", routeId: "chat" });
     await openAutomations();
     await expect.poll(() => automationRows.getByText("Writer release digest").count()).toBe(1);
     await expect.poll(() => automationRows.getByText("Main release digest").count()).toBe(0);
