@@ -387,7 +387,15 @@ describe("runCodexAppServerAttempt steering", () => {
       });
       let steerPersisted = false;
       const userTurnTranscriptRecorder = {
-        message: { role: "user" as const, content: "steer this active turn", timestamp: 1 },
+        message: {
+          role: "user" as const,
+          content: "steer this active turn",
+          timestamp: 1,
+          __openclaw: {
+            workContext: "Selected steering task",
+            workContextRevision: "steer-revision",
+          },
+        },
         async resolveMessage() {
           return this.message;
         },
@@ -508,6 +516,14 @@ describe("runCodexAppServerAttempt steering", () => {
         fastWait,
       );
       const steer = requests.find((entry) => entry.method === "turn/steer");
+      expect(steer?.params).toMatchObject({
+        additionalContext: {
+          openclaw_work_context: {
+            kind: "untrusted",
+            value: expect.stringContaining("Selected steering task"),
+          },
+        },
+      });
       const clientUserMessageId = (steer?.params as { clientUserMessageId?: string } | undefined)
         ?.clientUserMessageId;
       if (!clientUserMessageId) {

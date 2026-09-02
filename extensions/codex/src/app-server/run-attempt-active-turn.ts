@@ -5,6 +5,7 @@ import {
   embeddedAgentLog,
   formatErrorMessage,
   resolveAttemptFsWorkspaceOnly,
+  resolveWorkContextMessage,
   setActiveEmbeddedRun,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { getAgentScopedMediaLocalRoots } from "openclaw/plugin-sdk/media-local-roots";
@@ -318,6 +319,10 @@ export function activateCodexAttemptTurn(
     requestTimeoutMs: connection.appServer.requestTimeoutMs,
     signal: runAbortController.signal,
     assertActive: assertSteeringActive,
+    workContextMessage: resolveWorkContextMessage(
+      context.historyState.messages,
+      runtime.runtimeParams.userTurnTranscriptRecorder?.message,
+    ),
     prepareMessage: async (text, options) => {
       const result = await detectAndLoadAgentHarnessPromptImages({
         ...imageContext,
