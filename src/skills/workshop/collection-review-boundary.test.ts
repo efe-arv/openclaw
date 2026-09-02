@@ -51,8 +51,14 @@ describe("skill collection review boundary", () => {
         agentId: "main",
         job,
         env: testState.env,
-        runTurn: async ({ job: reviewJob, executionRoot }) => {
+        runTurn: async ({ job: reviewJob, message, executionRoot }) => {
           expect(reviewJob.payload.kind).toBe("agentTurn");
+          expect(message).toContain(`Workshop directory: ${skillsRoot}`);
+          expect(message).toContain("Total skills: 5");
+          expect(message).toContain("List the Workshop directory for the full inventory");
+          expect(message).toContain("Recorded usage (name useCount lastUsedDaysAgo):");
+          expect(message).not.toContain("Current Workshop skills");
+          expect(message).not.toContain("description");
           expect(executionRoot).toEqual({
             workspaceDir: skillsRoot,
             cwd: skillsRoot,
