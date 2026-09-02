@@ -71,12 +71,13 @@ export async function runSkillCollectionReviewForAgent(params: {
         const turnResult = await params.runTurn({
           job: {
             ...params.job,
-            payload: { kind: "agentTurn", message },
+            payload: { ...params.job.payload, kind: "agentTurn", message },
           },
           message,
           ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
-          // File tools are rooted at Workshop; host exec retains normal cron authority.
-          // cwd is a working directory, not a shell filesystem jail.
+          // File tools are rooted at the Workshop directory. Exec follows the operator's cron
+          // exec-approval policy; with the default policy and no approval client it is denied.
+          // Reviewed instructions cannot gain host authority the operator has not granted to automations.
           executionRoot: {
             workspaceDir: skillsRoot,
             cwd: skillsRoot,

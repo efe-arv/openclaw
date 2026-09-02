@@ -28,7 +28,11 @@ describe("resolveSkillCollectionReviewMonitorSpecs", () => {
       name: "skill-collection-review-main",
       displayName: "Skill collection review (main)",
       enabled: true,
-      payload: { kind: "agentTurn", message: expect.any(String) },
+      payload: {
+        kind: "agentTurn",
+        message: expect.any(String),
+        toolsAllow: ["read", "write", "edit", "apply_patch", "exec", "process"],
+      },
       schedule: {
         kind: "every",
         everyMs: 7 * 24 * 60 * 60_000,
@@ -37,6 +41,7 @@ describe("resolveSkillCollectionReviewMonitorSpecs", () => {
       sessionTarget: "isolated",
       wakeMode: "next-heartbeat",
     });
+    expect(specs[0]?.input.payload).not.toHaveProperty("toolsAllowIsDefault");
     const repeated = resolveSkillCollectionReviewMonitorSpecs(cfg, {
       schedulerSeed: "test-seed",
     });

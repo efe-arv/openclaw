@@ -34,7 +34,11 @@ describe("skill collection review boundary", () => {
       schedule: { kind: "every", everyMs: 604_800_000 },
       sessionTarget: "isolated",
       wakeMode: "next-heartbeat",
-      payload: { kind: "agentTurn", message: "review" },
+      payload: {
+        kind: "agentTurn",
+        message: "review",
+        toolsAllow: ["read", "write", "edit", "apply_patch", "exec", "process"],
+      },
       state: {},
     } satisfies CronStoredJob;
 
@@ -53,6 +57,11 @@ describe("skill collection review boundary", () => {
         env: testState.env,
         runTurn: async ({ job: reviewJob, message, executionRoot }) => {
           expect(reviewJob.payload.kind).toBe("agentTurn");
+          expect(reviewJob.payload).toEqual({
+            kind: "agentTurn",
+            message,
+            toolsAllow: ["read", "write", "edit", "apply_patch", "exec", "process"],
+          });
           expect(message).toContain(`Workshop directory: ${skillsRoot}`);
           expect(message).toContain("Total skills: 5");
           expect(message).toContain("List the Workshop directory for the full inventory");

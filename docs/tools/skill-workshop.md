@@ -110,11 +110,14 @@ cadence; the job is enabled only when `skills.workshop.autonomous.mode` is
 as its working directory, file-tool root, and session root. It keeps distinct
 useful skills, rewrites weak ones, consolidates overlap, and drops junk or stale
 fragments.
-When the operator runs agents in a sandbox, the sandbox workspace for this turn
-is the Workshop directory.
-Choosing `auto` intentionally authorizes those rewrites and drops without a
-second approval **for Workshop-owned paths only**; `propose` and `off` do not
-run collection review.
+The file tools are rooted at the Workshop directory. The review keeps the
+normal `exec` tool, but shell access follows the operator's cron exec-approval
+policy. With the default policy and no connected approval client, `exec` is
+denied immediately and the reviewer continues with file tools. Reviewed skill
+instructions cannot grant host access that the operator has not already granted
+to automations. To grant shell access on purpose, add the command to the exec
+allowlist or choose a standing grant from the approval card. `propose` and
+`off` do not run collection review.
 
 The review prompt asks the agent to stay inside the Workshop directory. The
 agent edits files directly during this scheduled turn. A full-tree snapshot is
@@ -132,9 +135,8 @@ tree diff as kept, written, or dropped, including each drop reason. The changed
 collection appears in new agent runs; running sessions keep their existing
 skill snapshot.
 
-File tools use the Workshop directory as their containment root. Shell commands
-run with that directory as `cwd`, but the normal host shell authority applies;
-`cwd` does not physically jail shell commands, and no container is required.
+Shell commands use the Workshop directory as their working directory. That
+directory is not a physical shell jail, and this job does not force a sandbox.
 
 To undo the last completed cleanup, ask the agent to restore the skill
 collection. It uses `skill_workshop` action `restore_collection` under the same

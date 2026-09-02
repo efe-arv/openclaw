@@ -54,6 +54,7 @@ export function resolveSkillCollectionReviewMonitorSpecs(
           kind: "agentTurn",
           message:
             "Review the global Skill Workshop collection. Work only inside the Workshop directory provided for this turn.",
+          toolsAllow: ["read", "write", "edit", "apply_patch", "exec", "process"],
         },
         sessionTarget: "isolated",
         wakeMode: "next-heartbeat",
