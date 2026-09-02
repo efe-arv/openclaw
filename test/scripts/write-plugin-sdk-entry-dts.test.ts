@@ -123,7 +123,7 @@ describe("write-plugin-sdk-entry-dts", () => {
     expect(
       (initial.stdout + initial.stderr).match(/\[tsdown-build\] invocation \d\/2 finished/gu),
     ).toHaveLength(2);
-    const before = treeHashes(path.join(root, "dist"));
+    let before = treeHashes(path.join(root, "dist"));
     expectOutputs(root, production, Object.keys(before));
     expectStagingClean(root);
     const records = declarationCacheRecords(root);
@@ -178,7 +178,8 @@ describe("write-plugin-sdk-entry-dts", () => {
     expect(
       (privateQa.stdout + privateQa.stderr).match(/\[tsdown-build\] invocation \d\/2 finished/gu),
     ).toHaveLength(2);
-    expectOutputs(root, qa, Object.keys(treeHashes(path.join(root, "dist"))));
+    before = treeHashes(path.join(root, "dist"));
+    expectOutputs(root, qa, Object.keys(before));
     expectStagingClean(root);
 
     writeDeclarations("after");
