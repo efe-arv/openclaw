@@ -6634,8 +6634,17 @@ source "$ROOT_DIR/scripts/lib/docker-e2e-logs.sh"
   it("proves gateway suspension across a same-container process restart", () => {
     const runner = readFileSync(GATEWAY_NETWORK_DOCKER_E2E_PATH, "utf8");
     expectTextToIncludeAll(runner, [
+      'source "$ROOT_DIR/scripts/lib/frozen-target-compat.sh"',
       "plugins enable admin-http-rpc",
       "/tmp/gateway-network-configured",
+      "GW_CAPABILITIES_PATH=$CAPABILITIES_CONTAINER_PATH",
+      "run_logged gateway-network-capabilities-dir",
+      "docker_e2e_docker_cmd run --rm",
+      "--user 0:0",
+      "--entrypoint sh",
+      'chown -R "$OPENCLAW_CAPABILITIES_OUTPUT_USER" /tmp/gateway-network-output',
+      'if [[ "$SUSPENSION_CAPABILITY" == "unsupported" ]]',
+      "openclaw_frozen_target_omissions_authorized",
       "run_suspension_phase() {",
       "GW_MODE=suspension-$stage-restart",
       "run_suspension_phase pre",
@@ -6650,6 +6659,8 @@ source "$ROOT_DIR/scripts/lib/docker-e2e-logs.sh"
       'run_logged_print "gateway-network-suspension-$stage"',
       '"phase":"container-restart","durationMs":%d',
     ]);
+    expect(runner).not.toContain('source "$ROOT_DIR/scripts/lib/live-docker-auth.sh"');
+    expect(runner).not.toContain("openclaw_live_chown_bind_dirs_for_container_user");
   });
 
   it.each([
