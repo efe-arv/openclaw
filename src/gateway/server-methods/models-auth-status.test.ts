@@ -2572,6 +2572,33 @@ describe("models.authOrderSet", () => {
     expect(firstRespondCall(opts)?.[0]).toBe(true);
   });
 
+  it("acknowledges a committed order when runtime auth refresh fails", async () => {
+    mocks.refreshActiveProviderAuthRuntimeSnapshot.mockRejectedValueOnce(
+      new Error("runtime refresh failed"),
+    );
+    const opts = createOrderOptions({
+      provider: "openai",
+      profileIds: ["openai:two", "openai:one"],
+    });
+
+    await orderHandler(opts);
+
+    expect(firstRespondCall(opts)?.[0]).toBe(true);
+    expect(mocks.loadDeferredCatalog).toHaveBeenCalledOnce();
+  });
+
+  it("acknowledges a committed order when prepared owner publication fails", async () => {
+    mocks.loadDeferredCatalog.mockRejectedValueOnce(new Error("catalog publication failed"));
+    const opts = createOrderOptions({
+      provider: "openai",
+      profileIds: ["openai:two", "openai:one"],
+    });
+
+    await orderHandler(opts);
+
+    expect(firstRespondCall(opts)?.[0]).toBe(true);
+  });
+
   it("clears the stored override with null", async () => {
     const opts = createOrderOptions({ provider: "openai" });
 

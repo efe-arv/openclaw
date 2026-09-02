@@ -379,12 +379,23 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         return;
       }
       invalidateModelAuthStatusCache();
-      await refreshActiveProviderAuthRuntimeSnapshot();
+      await refreshActiveProviderAuthRuntimeSnapshot().catch((err: unknown) => {
+        log.warn(
+          `runtime auth refresh after committed priority update failed: ${formatForLog(err)}`,
+        );
+      });
       // Store publication already invalidates and rebuilds the affected prepared owners. Starting
       // a second config publication here can race hot reload and revive its older config snapshot.
       // Join that owner's publication before acknowledging the write so an immediate selection
-      // observes the new order instead of the invalidated generation.
-      await loadDeferredCatalog(context, scope.agentId, { readOnly: true });
+      // observes the new order instead of the invalidated generation. A failed join cannot roll
+      // back the durable write, so report it without turning the committed result into a failure.
+      await loadDeferredCatalog(context, scope.agentId, { readOnly: true }).catch(
+        (err: unknown) => {
+          log.warn(
+            `catalog publication after committed priority update failed: ${formatForLog(err)}`,
+          );
+        },
+      );
       void warmCurrentProviderAuthStateOffMainThread(context.getRuntimeConfig()).catch(
         (err: unknown) => {
           log.warn(`provider auth state rewarm after priority update failed: ${formatForLog(err)}`);
