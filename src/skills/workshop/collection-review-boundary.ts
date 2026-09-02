@@ -184,13 +184,15 @@ async function resolveReviewSkills(
   const hashes = await Promise.all(
     skills.map(async (skill) => await readSkillProposalTargetTreeSha256(skill.baseDir)),
   );
-  return skills.map((skill, index) => {
+  const resolvedSkills: Array<ReviewSkill & { treeHash: string }> = [];
+  for (const [index, skill] of skills.entries()) {
     const treeHash = hashes[index];
     if (treeHash === undefined) {
       throw new Error(`Could not hash Workshop skill: ${skill.name}`);
     }
-    return Object.assign(skill, { treeHash });
-  });
+    resolvedSkills.push({ ...skill, treeHash });
+  }
+  return resolvedSkills;
 }
 
 function resolveReviewConfig(config: OpenClawConfig): OpenClawConfig {
