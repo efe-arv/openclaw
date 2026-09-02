@@ -61,6 +61,7 @@ export function prepareEmbeddedAttemptToolBase(params: {
   agentDir: string;
   attempt: EmbeddedRunAttemptParams;
   effectiveCwd: string;
+  effectiveFsWorkspaceOnly: boolean;
   effectiveWorkspace: string;
   markCoreToolStage: (name: string) => void;
   onYield: NonNullable<OpenClawCodingToolsOptions["onYield"]>;
@@ -315,6 +316,9 @@ export function prepareEmbeddedAttemptToolBase(params: {
             preparedModelRuntime: attempt.preparedModelRuntime,
             cwd: params.effectiveCwd,
             workspaceDir: params.effectiveWorkspace,
+            ...(attempt.workspaceOnlyOverride !== undefined
+              ? { workspaceOnlyOverride: params.effectiveFsWorkspaceOnly }
+              : {}),
             spawnWorkspaceDir,
             config: toolSearchRuntimeConfig,
             sessionConfigSource: attempt.oneShotCliRun ? "pinned" : "runtime",
@@ -331,7 +335,6 @@ export function prepareEmbeddedAttemptToolBase(params: {
               origin: attempt.skillWorkshopOrigin,
               proposalMutationBudget: attempt.skillWorkshopProposalMutationBudget,
               proposalReviewCompletion: attempt.skillWorkshopProposalReviewCompletion,
-              collectionReconcile: attempt.skillWorkshopCollectionReconcile,
               proposalRevision: attempt.skillWorkshopProposalRevision,
               libraryAuthoring: attempt.skillLibraryAuthoring,
             },

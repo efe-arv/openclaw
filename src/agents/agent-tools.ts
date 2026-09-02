@@ -234,6 +234,8 @@ type OpenClawCodingToolsOptions = {
   /** Task working directory for coding tools. Defaults to workspaceDir. */
   cwd?: string;
   workspaceDir?: string;
+  /** Internal root override for a trusted scheduled workspace. */
+  workspaceOnlyOverride?: boolean;
   sessionPermissionPolicy?: PreparedSessionPermissionPolicy;
   /**
    * Workspace directory that spawned subagents should inherit.
@@ -580,7 +582,8 @@ function createOpenClawCodingToolsInternal(options?: OpenClawCodingToolsOptions)
   const includeChannelTools = toolConstructionPlan.includeChannelTools;
   const includePluginTools = toolConstructionPlan.includePluginTools;
   const workspaceOnly =
-    isMemoryFlushRun || (sessionCoreToolPolicy?.workspaceOnly ?? fsConfig.workspaceOnly === true);
+    options?.workspaceOnlyOverride ??
+    (isMemoryFlushRun || (sessionCoreToolPolicy?.workspaceOnly ?? fsConfig.workspaceOnly === true));
   const fsPolicy = {
     workspaceOnly,
     ...(sessionPermissionPolicy ? { root: sessionPermissionPolicy.root } : {}),

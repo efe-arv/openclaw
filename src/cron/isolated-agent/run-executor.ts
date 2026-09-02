@@ -255,6 +255,11 @@ function createCronPromptExecutor(params: {
   runSessionKey: string;
   usesDetachedRunSession?: boolean;
   workspaceDir: string;
+  executionRoot?: {
+    workspaceDir: string;
+    cwd: string;
+    sessionRoot: string;
+  };
   pluginRegistry?: PluginRegistry;
   lane?: string;
   resolvedVerboseLevel: VerboseLevel;
@@ -476,7 +481,7 @@ function createCronPromptExecutor(params: {
           agentId: params.agentId,
           sessionKey: params.runSessionKey,
           agentHarnessRuntimeOverride,
-          workspaceDir: params.workspaceDir,
+          workspaceDir: params.executionRoot?.workspaceDir ?? params.workspaceDir,
           pluginRegistry: params.pluginRegistry,
         });
       },
@@ -734,7 +739,11 @@ function createCronPromptExecutor(params: {
           messageThreadId: params.resolvedDelivery.threadId,
           currentChannelId,
           agentDir: params.agentDir,
-          workspaceDir: params.workspaceDir,
+          workspaceDir: params.executionRoot?.workspaceDir ?? params.workspaceDir,
+          bootstrapWorkspaceDir: params.workspaceDir,
+          cwd: params.executionRoot?.cwd,
+          sessionRoot: params.executionRoot?.sessionRoot,
+          workspaceOnlyOverride: params.executionRoot !== undefined,
           config: params.cfgWithAgentDefaults,
           skillsSnapshot: params.skillsSnapshot,
           prompt: promptText,
@@ -882,6 +891,11 @@ export async function executeCronRun(params: {
   runSessionKey: string;
   usesDetachedRunSession?: boolean;
   workspaceDir: string;
+  executionRoot?: {
+    workspaceDir: string;
+    cwd: string;
+    sessionRoot: string;
+  };
   lane?: string;
   resolvedDelivery: {
     channel?: string;
@@ -944,6 +958,7 @@ export async function executeCronRun(params: {
     runSessionKey: params.runSessionKey,
     usesDetachedRunSession: params.usesDetachedRunSession,
     workspaceDir: params.workspaceDir,
+    executionRoot: params.executionRoot,
     pluginRegistry: params.pluginRegistry,
     lane: params.lane,
     resolvedVerboseLevel,

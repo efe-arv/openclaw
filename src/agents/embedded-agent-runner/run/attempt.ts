@@ -207,6 +207,7 @@ export async function runEmbeddedAttempt(
         agentDir,
         attempt: params,
         effectiveCwd,
+        effectiveFsWorkspaceOnly,
         effectiveWorkspace,
         markCoreToolStage: (name) => corePluginToolStages.mark(name),
         onYield: (message, acknowledgment) => {

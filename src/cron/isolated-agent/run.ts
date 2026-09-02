@@ -229,6 +229,7 @@ export async function runCronIsolatedAgentTurn(params: {
       runSessionKey: prepared.context.runSessionKey,
       usesDetachedRunSession: prepared.context.usesDetachedRunSession,
       workspaceDir: prepared.context.workspaceDir,
+      executionRoot: prepared.context.executionRoot,
       lane: params.lane,
       resolvedDelivery: {
         channel: prepared.context.resolvedDelivery.channel,

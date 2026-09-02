@@ -3,14 +3,10 @@ import { SKILL_WORKSHOP_TOOL_DISPLAY_SUMMARY } from "../tool-description-presets
 
 export function buildSkillWorkshopToolDescription(params: {
   autonomousMode: "off" | "propose" | "auto";
-  collectionOnly: boolean;
   proposalRevision: boolean;
 }): string {
   if (params.proposalRevision) {
     return `Inspect and revise only the proposal revision selected by the operator. The proposal id and expected revision hash are bound by the run and cannot be replaced by tool arguments. Never apply, reject, quarantine, or create another proposal.\n\n${SKILL_AUTHORING_STANDARDS_PROMPT}`;
-  }
-  if (params.collectionOnly) {
-    return `${SKILL_WORKSHOP_TOOL_DISPLAY_SUMMARY} Read the Workshop-generated skills you intend to change, then finish with one reconcile call listing only writes and drops; unlisted skills stay. An empty collection records that nothing changed. This tool never edits skills outside the Workshop directory; the operator edits those directly.\n\n${SKILL_AUTHORING_STANDARDS_PROMPT}`;
   }
   const repairPolicy =
     params.autonomousMode === "off"

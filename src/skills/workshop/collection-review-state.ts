@@ -15,7 +15,6 @@ import {
   type OpenClawStateDatabaseOptions,
 } from "../../state/openclaw-state-db.js";
 import { withOpenClawStateLease } from "../../state/openclaw-state-lease.js";
-import type { SkillCollectionReconcileResult } from "./collection-contracts.js";
 import {
   databaseOptions,
   ensureSkillWorkshopSchema,
@@ -42,7 +41,14 @@ type SkillCollectionReviewOutcome = {
   backupId: string;
   kept: string[];
   written: string[];
-  dropped: SkillCollectionReconcileResult["dropped"];
+  dropped: Array<{ name: string; reason: string }>;
+};
+
+export type SkillCollectionReviewResult = {
+  backupId: string;
+  kept: string[];
+  written: string[];
+  dropped: Array<{ name: string; reason: string }>;
 };
 
 export type SkillCollectionReviewStatus = {
@@ -64,12 +70,14 @@ function workspaceKey(workspaceDir: string): string {
 }
 
 export async function withSkillCollectionReviewClaim<T>(
-  run: () => Promise<T>,
+  run: (
+    lease: import("../../state/openclaw-state-lease.js").OpenClawStateLeaseContext,
+  ) => Promise<T>,
   options: OpenClawStateDatabaseOptions = {},
 ): Promise<T> {
   return await withOpenClawStateLease(
     {
-      scope: "skill-collection-review",
+      scope: "skill-collection",
       key: COLLECTION_REVIEW_KEY,
       database: { scope: "shared", options },
       leaseMs: REVIEW_CLAIM_MS,
@@ -77,7 +85,7 @@ export async function withSkillCollectionReviewClaim<T>(
       leaseLabel: "skill collection review claim",
       operationLabel: "skill-collection.review",
     },
-    async () => await run(),
+    async (lease) => await run(lease),
   );
 }
 
@@ -178,7 +186,7 @@ function parseStoredNames(value: string, field: string): string[] {
   return parsed;
 }
 
-function parseStoredDrops(value: string): SkillCollectionReconcileResult["dropped"] {
+function parseStoredDrops(value: string): SkillCollectionReviewResult["dropped"] {
   const parsed: unknown = JSON.parse(value);
   if (!Array.isArray(parsed)) {
     throw new Error("Invalid dropped entries in stored skill collection review.");
@@ -217,7 +225,7 @@ export function listSkillCollectionReviewOutcomes(
 
 export function recordSkillCollectionReviewHistory(
   nowMs: number,
-  result: SkillCollectionReconcileResult,
+  result: SkillCollectionReviewResult,
   options: SkillWorkshopStoreOptions = {},
 ): void {
   ensureSkillWorkshopSchema(options);

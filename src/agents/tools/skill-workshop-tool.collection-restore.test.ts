@@ -1,73 +1,57 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { applySkillProposal, proposeCreateSkill } from "../../skills/workshop/service.js";
+import { describe, expect, it } from "vitest";
+import { runSkillCollectionReviewForAgent } from "../../skills/workshop/collection-review-boundary.js";
 import { resolveWorkshopSkillsDir } from "../../skills/workshop/skills-root.js";
 import { createOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { createTrackedTempDirs } from "../../test-utils/tracked-temp-dirs.js";
 import { createSkillWorkshopTool } from "./skill-workshop-tool.js";
 
 const tempDirs = createTrackedTempDirs();
-const cleanups: Array<() => Promise<void>> = [];
-
-afterEach(async () => {
-  await Promise.all(cleanups.splice(0).map(async (cleanup) => await cleanup()));
-  await tempDirs.cleanup();
-});
 
 describe("skill_workshop collection restore", () => {
-  it("restores a canonical cleanup into the Workshop directory", async () => {
-    const testState = await createOpenClawTestState({
-      layout: "state-only",
-      prefix: "openclaw-skill-collection-restore-state-",
-    });
-    cleanups.push(async () => await testState.cleanup());
-    const workspaceDir = await fs.realpath(
-      await tempDirs.make("openclaw-skill-collection-restore-"),
-    );
-    const proposal = await proposeCreateSkill({
-      workspaceDir,
-      env: testState.env,
-      name: "duplicate",
-      description: "Duplicate procedure",
-      content: "# Duplicate procedure\n",
-    });
-    await applySkillProposal({
-      workspaceDir,
-      env: testState.env,
-      proposalId: proposal.record.id,
-      expectedRevisionHash: proposal.revisionHash,
-    });
-    const reviewTool = createSkillWorkshopTool({
-      workspaceDir,
-      env: testState.env,
-      collectionReconcile: { approvedSkillNames: new Set(["duplicate"]) },
-    });
-    await reviewTool.execute("read", { action: "read", skill_name: "duplicate" });
-    const reconciled = await reviewTool.execute("reconcile", {
-      action: "reconcile",
-      collection: [{ action: "drop", name: "duplicate", reason: "redundant" }],
-    });
-    const backupId = (reconciled.details as { backupId: string }).backupId;
-    const workshopSkillFile = path.join(
-      resolveWorkshopSkillsDir(testState.env),
-      "duplicate",
-      "SKILL.md",
-    );
-    await expect(fs.access(workshopSkillFile)).rejects.toThrow();
-
-    const foregroundTool = createSkillWorkshopTool({ workspaceDir, env: testState.env });
-    const restored = await foregroundTool.execute("restore", { action: "restore_collection" });
-    expect(restored).toMatchObject({
-      content: [
-        {
-          type: "text",
-          text: `Restored skill collection backup ${backupId}: restored 1, removed 0.`,
+  it("restores the latest review through restore_collection", async () => {
+    const testState = await createOpenClawTestState({ layout: "state-only" });
+    const workspaceDir = await tempDirs.make("openclaw-skill-collection-restore-");
+    const skillsRoot = resolveWorkshopSkillsDir(testState.env);
+    const skillFile = path.join(skillsRoot, "duplicate", "SKILL.md");
+    const job = {
+      id: "skill-review",
+      declarationKey: "skill-collection-review:main",
+      name: "skill review",
+      enabled: true,
+      createdAtMs: 1,
+      updatedAtMs: 1,
+      agentId: "main",
+      schedule: { kind: "every", everyMs: 604_800_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "review" },
+      state: {},
+    };
+    try {
+      await fs.mkdir(path.dirname(skillFile), { recursive: true });
+      await fs.writeFile(
+        skillFile,
+        "---\nname: duplicate\ndescription: Original\n---\n\n# Original\n",
+      );
+      await runSkillCollectionReviewForAgent({
+        config: { skills: { workshop: { autonomous: { mode: "auto" } } } },
+        agentId: "main",
+        job,
+        env: testState.env,
+        runTurn: async () => {
+          await fs.writeFile(skillFile, "---\nname: duplicate\ndescription: New\n---\n\n# New\n");
+          return { status: "ok", summary: "reviewed", outputText: "done" };
         },
-      ],
-      details: { backupId, restored: ["duplicate"], removed: [] },
-    });
+      });
 
-    await expect(fs.readFile(workshopSkillFile, "utf8")).resolves.toContain("Duplicate procedure");
+      const tool = createSkillWorkshopTool({ workspaceDir, env: testState.env });
+      await tool.execute("restore", { action: "restore_collection" });
+      await expect(fs.readFile(skillFile, "utf8")).resolves.toContain("# Original");
+    } finally {
+      await testState.cleanup();
+      await tempDirs.cleanup();
+    }
   });
 });

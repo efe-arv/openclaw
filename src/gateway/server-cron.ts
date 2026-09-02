@@ -57,6 +57,7 @@ import {
   resolveCronDeliverySessionKey,
   resolveCronSessionTargetSessionKey,
 } from "../cron/session-target.js";
+import { skillCollectionReviewMonitorAgentId } from "../cron/skill-collection-review-monitor.js";
 import { resolveCronJobsStorePathFromConfig } from "../cron/store.js";
 import { cronStreamScheduleKey } from "../cron/stream-schedule.js";
 import { createCronScriptRuntime } from "../cron/trigger-script.js";
@@ -99,7 +100,7 @@ import {
 } from "../routing/session-key.js";
 import { defaultRuntime } from "../runtime.js";
 import { parseAgentSessionKey } from "../sessions/session-key-utils.js";
-import { runSkillCollectionReviewForAgent } from "../skills/workshop/collection-review.js";
+import { runSkillCollectionReviewForAgent } from "../skills/workshop/collection-review-boundary.js";
 import {
   createCronExitWatchers,
   type CronExitResult,
@@ -910,12 +911,6 @@ export function buildGatewayCronService(params: {
         deps: { ...params.deps, runtime: defaultRuntime },
       });
     },
-    runSkillCollectionReview: ({ agentId, abortSignal }) =>
-      runSkillCollectionReviewForAgent({
-        config: getRuntimeConfig(),
-        agentId,
-        ...(abortSignal ? { abortSignal } : {}),
-      }),
     runIsolatedAgentJob: async ({
       job,
       message,
@@ -927,6 +922,25 @@ export function buildGatewayCronService(params: {
     }) => {
       const { agentId, cfg: runtimeConfig } = resolveCronAgent(job.agentId);
       const sessionKey = resolveCronSessionTargetSessionKey(job.sessionTarget) ?? `cron:${job.id}`;
+      const reviewAgentId = skillCollectionReviewMonitorAgentId(job);
+      if (reviewAgentId) {
+        return await runSkillCollectionReviewForAgent({
+          config: runtimeConfig,
+          agentId: reviewAgentId,
+          job,
+          runTurn: async ({ job: reviewJob, message: reviewMessage, ...reviewParams }) =>
+            await runCronIsolatedAgentTurn({
+              cfg: runtimeConfig,
+              deps: params.deps,
+              job: reviewJob,
+              message: reviewMessage,
+              ...reviewParams,
+              agentId,
+              sessionKey,
+              lane: "cron",
+            }),
+        });
+      }
       return await runCronIsolatedAgentTurn({
         cfg: runtimeConfig,
         deps: params.deps,

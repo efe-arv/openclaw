@@ -29,6 +29,12 @@ export type RunCronAgentTurnParams = {
   sessionKey: string;
   agentId?: string;
   lane?: string;
+  /** Host-only execution roots for system-owned turns; never persisted in cron state. */
+  executionRoot?: {
+    workspaceDir: string;
+    cwd: string;
+    sessionRoot: string;
+  };
 };
 
 export function resolveCronAgentTurnMessage(input: RunCronAgentTurnParams): string {
