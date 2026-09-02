@@ -2568,6 +2568,7 @@ final class NodeAppModel {
 
         let shouldSpeak = params.speak ?? true
         let status = await notificationAuthorizationStatus()
+        try Task.checkCancellation()
         let notificationsAllowed = Self.isNotificationServingEnabled(status)
         if !notificationsAllowed, !shouldSpeak {
             return BridgeInvokeResponse(
@@ -2599,6 +2600,7 @@ final class NodeAppModel {
         }
 
         if shouldSpeak {
+            try Task.checkCancellation()
             let toSpeak = text
             Task { @MainActor in
                 try? await TalkSystemSpeechSynthesizer.shared.speak(text: toSpeak)

@@ -1,11 +1,11 @@
 import Foundation
-import OpenClawKit
 import OpenClawProtocol
 import Testing
 import UIKit
 import UserNotifications
 @testable import OpenClaw
 @testable import OpenClawChatUI
+@testable import OpenClawKit
 
 @MainActor
 private final class MockVoiceNoteAudioCapture: VoiceNoteAudioCapture {
@@ -7012,6 +7012,32 @@ private final class TimingOutDeviceStatusService: DeviceStatusServicing {
 
         #expect(res.ok)
         #expect(center.addCalls == 1)
+    }
+
+    @Test @MainActor func `cancelled chat push cannot continue as speech after authorization`() async throws {
+        let (center, appModel) = makeNotificationModel(status: .denied)
+        let authorizationGate = NotificationAuthorizationGate()
+        center.authorizationStatusHandler = { await authorizationGate.wait() }
+        let request = try makeInvokeRequest(
+            id: "cancelled-chat-push",
+            command: OpenClawChatCommand.push.rawValue,
+            params: OpenClawChatPushParams(text: "Cancelled notification test", speak: true))
+        let invocation = Task { @MainActor in await appModel.handleInvoke(request) }
+        let deadline = ContinuousClock().now.advanced(by: .seconds(2))
+        while await !(authorizationGate.hasStarted()), ContinuousClock().now < deadline {
+            await Task.yield()
+        }
+        let authorizationStarted = await authorizationGate.hasStarted()
+        invocation.cancel()
+        await authorizationGate.resume(returning: .denied)
+        let response = await invocation.value
+        await Task.yield()
+        TalkSystemSpeechSynthesizer.shared.stop()
+
+        #expect(authorizationStarted)
+        #expect(!response.ok)
+        #expect(response.error?.message == "node invoke cancelled")
+        #expect(center.addCalls == 0)
     }
 
     @Test @MainActor func `handle invoke rejects invalid screen format`() async {
