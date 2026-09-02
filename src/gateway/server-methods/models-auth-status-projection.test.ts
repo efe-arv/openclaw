@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AuthProviderHealth } from "../../agents/auth-health.js";
-import type { AuthProfileStore, RuntimeAuthProfileStore } from "../../agents/auth-profiles.js";
+import type { AuthProfileStore } from "../../agents/auth-profiles.js";
+import type { RuntimeAuthProfileStore } from "../../agents/auth-profiles/types.js";
 import type { ProviderAuthAliasLookupParams } from "../../agents/provider-auth-aliases.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import { createPluginMetadataSnapshotFixture } from "../../plugins/plugin-metadata.test-support.js";
@@ -182,8 +183,8 @@ describe("resolveConfigBoundAuthBindings", () => {
     const config: OpenClawConfig = {
       models: {
         providers: {
-          openai: { baseUrl: "https://example.test/v1", apiKey: lockedProfileId },
-          "credential-owner": { baseUrl: "https://example.test/v1" },
+          openai: { baseUrl: "https://example.test/v1", apiKey: lockedProfileId, models: [] },
+          "credential-owner": { baseUrl: "https://example.test/v1", models: [] },
         },
       },
     };

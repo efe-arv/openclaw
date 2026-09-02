@@ -1113,7 +1113,7 @@ describe("models.authStatus", () => {
     const plugins = [
       {
         id: "anthropic",
-        origin: "bundled",
+        origin: "bundled" as const,
         providerAuthAliases: { "claude-cli": "anthropic" },
       },
     ];
@@ -1531,7 +1531,7 @@ describe("models.authStatus", () => {
     const plugins = [
       {
         id: "anthropic",
-        origin: "bundled",
+        origin: "bundled" as const,
         providerAuthAliases: { "claude-cli": "anthropic" },
       },
     ];
@@ -2407,7 +2407,7 @@ describe("models.authOrderSet", () => {
     const plugins = [
       {
         id: "anthropic",
-        origin: "bundled",
+        origin: "bundled" as const,
         providerAuthAliases: { "claude-cli": "anthropic" },
       },
     ];
