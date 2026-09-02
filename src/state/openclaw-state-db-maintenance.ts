@@ -384,6 +384,42 @@ function staleReleasedWorkshopClaims(db: DatabaseSync): void {
   }
 }
 
+function removeLegacySkillCollectionReviewJobs(db: DatabaseSync, previousVersion: number): boolean {
+  if (previousVersion >= 16 || !tableExists(db, "cron_jobs")) {
+    return false;
+  }
+  const legacyJobs = db
+    .prepare(
+      `SELECT 1
+         FROM cron_jobs
+        WHERE payload_kind = 'skillCollectionReview'
+           OR (json_valid(job_json) AND json_extract(job_json, '$.payload.kind') = 'skillCollectionReview')
+        LIMIT 1`,
+    )
+    .all();
+  if (tableExists(db, "cron_job_scratch")) {
+    db.exec(`
+      DELETE FROM cron_job_scratch
+       WHERE EXISTS (
+         SELECT 1
+           FROM cron_jobs
+          WHERE cron_jobs.store_key = cron_job_scratch.store_key
+            AND cron_jobs.job_id = cron_job_scratch.job_id
+            AND (
+              cron_jobs.payload_kind = 'skillCollectionReview'
+              OR (json_valid(cron_jobs.job_json) AND json_extract(cron_jobs.job_json, '$.payload.kind') = 'skillCollectionReview')
+            )
+       );
+    `);
+  }
+  db.exec(`
+    DELETE FROM cron_jobs
+     WHERE payload_kind = 'skillCollectionReview'
+        OR (json_valid(job_json) AND json_extract(job_json, '$.payload.kind') = 'skillCollectionReview');
+  `);
+  return legacyJobs.length > 0;
+}
+
 /** Remove row provenance after the Workshop directory becomes the ownership boundary. */
 function migrateSkillWorkshopDirectoryOwnership(
   db: DatabaseSync,
@@ -392,6 +428,7 @@ function migrateSkillWorkshopDirectoryOwnership(
   if (previousVersion >= 16) {
     return false;
   }
+  const removedLegacyJobs = removeLegacySkillCollectionReviewJobs(db, previousVersion);
   const proposalColumns = ["workspace_dir", "claim_released_time"].filter((column) =>
     tableHasColumn(db, "skill_workshop_proposals", column),
   );
@@ -401,7 +438,7 @@ function migrateSkillWorkshopDirectoryOwnership(
     "workspace_dir",
   );
   if (proposalColumns.length === 0 && !reviewHasWorkspace) {
-    return false;
+    return removedLegacyJobs;
   }
   if (proposalColumns.includes("claim_released_time")) {
     staleReleasedWorkshopClaims(db);

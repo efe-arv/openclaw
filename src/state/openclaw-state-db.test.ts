@@ -1523,7 +1523,7 @@ afterEach(() => {
 });
 
 describe("openclaw state database", () => {
-  it("migrates v15 Skill Workshop ownership columns to v16 without losing rows", () => {
+  it("migrates v15 Skill Workshop ownership and removes legacy review jobs", () => {
     const stateDir = createTempStateDir();
     const options = { env: { OPENCLAW_STATE_DIR: stateDir } };
     const databasePath = materializeCurrentStateDatabase(stateDir);
@@ -1629,6 +1629,55 @@ describe("openclaw state database", () => {
         ) VALUES ('review-v15', '/tmp/workspace', 'backup-v15', 1, '[]', '[]', '[]')`,
       )
       .run();
+    legacy
+      .prepare(
+        `INSERT INTO cron_jobs (
+          store_key, job_id, declaration_key, owner_agent_id, name, description,
+          enabled, agent_id, payload_kind, job_json, state_json, runtime_updated_at_ms,
+          schedule_identity, sort_order, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        path.join(stateDir, "cron", "jobs.json"),
+        "legacy-skill-review",
+        "skill-collection-review:main",
+        "main",
+        "skill-collection-review-main",
+        "legacy Skill Workshop review",
+        1,
+        "main",
+        "skillCollectionReview",
+        JSON.stringify({
+          id: "legacy-skill-review",
+          declarationKey: "skill-collection-review:main",
+          name: "skill-collection-review-main",
+          enabled: true,
+          agentId: "main",
+          schedule: { kind: "every", everyMs: 7 * 24 * 60 * 60_000 },
+          sessionTarget: "main",
+          wakeMode: "next-heartbeat",
+          payload: { kind: "skillCollectionReview" },
+        }),
+        "{}",
+        1,
+        null,
+        0,
+        1,
+      );
+    legacy
+      .prepare(
+        `INSERT INTO cron_job_scratch (
+          store_key, job_id, content, revision, source_sha256, updated_at_ms
+        ) VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        path.join(stateDir, "cron", "jobs.json"),
+        "legacy-skill-review",
+        "stale scratch",
+        1,
+        "a".repeat(64),
+        1,
+      );
     legacy.exec(`
       PRAGMA user_version = 15;
       UPDATE schema_meta SET schema_version = 15 WHERE meta_key = 'primary';
@@ -1686,6 +1735,18 @@ describe("openclaw state database", () => {
         .prepare("SELECT review_id, backup_id FROM skill_workshop_collection_reviews")
         .get(),
     ).toEqual({ review_id: "review-v15", backup_id: "backup-v15" });
+    expect(
+      migrated.db
+        .prepare(
+          "SELECT job_id FROM cron_jobs WHERE payload_kind = 'skillCollectionReview' OR json_extract(job_json, '$.payload.kind') = 'skillCollectionReview'",
+        )
+        .all(),
+    ).toEqual([]);
+    expect(
+      migrated.db
+        .prepare("SELECT job_id FROM cron_job_scratch WHERE job_id = 'legacy-skill-review'")
+        .all(),
+    ).toEqual([]);
   });
 
   it("upgrades a v15 store without Workshop tables before creating their v16 schema", () => {
