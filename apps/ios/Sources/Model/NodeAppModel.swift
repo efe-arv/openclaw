@@ -2601,6 +2601,8 @@ final class NodeAppModel {
 
         if shouldSpeak {
             try Task.checkCancellation()
+            // This synchronous handoff commits speech, like enqueueing a notification;
+            // playback intentionally outlives the command's immediate receipt.
             let toSpeak = text
             Task { @MainActor in
                 try? await TalkSystemSpeechSynthesizer.shared.speak(text: toSpeak)
