@@ -42,6 +42,7 @@ describe("runEmbeddedAttempt cwd/workspace split", () => {
       tempPaths,
       attemptOverrides: {
         cwd: taskRepo,
+        workspaceOnlyOverride: true,
         disableTools: false,
       },
     });
@@ -53,11 +54,17 @@ describe("runEmbeddedAttempt cwd/workspace split", () => {
     expect(bootstrapCall?.agentId).toBe("main");
 
     const toolsCall = hoisted.createOpenClawCodingToolsMock.mock.calls[0]?.[0] as
-      | { cwd?: string; workspaceDir?: string; spawnWorkspaceDir?: string }
+      | {
+          cwd?: string;
+          workspaceDir?: string;
+          spawnWorkspaceDir?: string;
+          workspaceOnlyOverride?: boolean;
+        }
       | undefined;
     expect(toolsCall?.cwd).toBe(taskRepo);
     expect(toolsCall?.workspaceDir).toBe(bootstrapCall?.workspaceDir);
     expect(toolsCall?.spawnWorkspaceDir).toBe(bootstrapCall?.workspaceDir);
+    expect(toolsCall?.workspaceOnlyOverride).toBe(true);
 
     const resourceLoaderInit = hoisted.defaultResourceLoaderInitMock.mock.calls[0]?.[0] as
       | { cwd?: string }
