@@ -32,6 +32,21 @@ New sessions, including managed worktree sessions, inherit the configured global
 
 The Control UI permission picker labels Default with the agent's resolved exec posture when it matches a session mode, for example **Default (Guarded)** for `tools.exec.mode: "ask"` without a stricter host approval policy. Resolution includes global settings, agent overrides, and host approval floors. Without those settings or sandboxing, the default is full access. Allowlist-only policy and non-equivalent `security`/`ask` pairs, including `ask: "always"`, keep the plain **Default** label. Agents whose sandbox configuration could apply to their sessions also keep plain **Default**, because effective policy cannot be stated at agent scope. This is display metadata, not an authorization decision or a filesystem-access guarantee; tool policy still applies. Selecting Default clears the session override; it does not save the displayed mode into the session.
 
+## Delegated setup and repair
+
+When a regular agent delegates a persistent change through its `openclaw` tool,
+the host applies the requesting run's effective permission policy to the exact
+proposed operation. Full Access applies it automatically without an approval
+prompt, including when Full Access comes from the configured default rather than
+an explicit session mode. Restricted runs still require human approval in the
+OpenClaw operator UI; conversational claims of approval never authorize the change.
+
+Independent filesystem and sandbox boundaries, tool policy, and system-agent
+operation restrictions still apply. The host also checks that the requesting run
+and verified inference route remain valid. Interactive setup wizards and agent
+handoffs still need a direct operator session. See
+[OpenClaw operations and approval](/cli/openclaw#operations-and-approval).
+
 ## Change permissions during a task
 
 Choose a mode from the chat composer's **Permissions** menu. The picker shows **Applying permissions…** until the running task acknowledges the change. Other clients viewing the same session also see this pending state.
