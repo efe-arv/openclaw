@@ -4,17 +4,14 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveHeartbeatSchedulerSeed } from "../infra/heartbeat-runner.js";
 import { resolveHeartbeatPhaseMs } from "../infra/heartbeat-schedule.js";
 import { resolveSkillWorkshopConfig } from "../skills/workshop/config.js";
+import { SKILL_COLLECTION_REVIEW_DECLARATION_PREFIX } from "./system-owned-declaration.js";
 import type { CronJob, CronJobCreate } from "./types.js";
 
-export const SKILL_COLLECTION_REVIEW_DECLARATION_PREFIX = "skill-collection-review:";
 const SKILL_COLLECTION_REVIEW_EVERY_MS = 7 * 24 * 60 * 60_000;
 
 export function skillCollectionReviewMonitorAgentId(job: CronJob): string | undefined {
   const key = job.declarationKey;
-  if (
-    !key?.startsWith(SKILL_COLLECTION_REVIEW_DECLARATION_PREFIX) ||
-    job.payload.kind !== "skillCollectionReview"
-  ) {
+  if (!key?.startsWith(SKILL_COLLECTION_REVIEW_DECLARATION_PREFIX)) {
     return undefined;
   }
   return key.slice(SKILL_COLLECTION_REVIEW_DECLARATION_PREFIX.length) || undefined;
@@ -23,8 +20,8 @@ export function skillCollectionReviewMonitorAgentId(job: CronJob): string | unde
 /**
  * One job, because the Workshop owns one global skill collection; a second job would only
  * contend for the same review lease. The owner is a scheduler identity, not a workspace: the
- * review never touches agent workspaces, so an explicit fleet without a system agent falls
- * back to its first configured agent instead of failing cron startup.
+ * review uses the ambient system agent, while the execution boundary redirects the turn to
+ * the global Workshop directory.
  */
 export function resolveSkillCollectionReviewMonitorSpecs(
   cfg: OpenClawConfig,
@@ -53,9 +50,12 @@ export function resolveSkillCollectionReviewMonitorSpecs(
             intervalMs: SKILL_COLLECTION_REVIEW_EVERY_MS,
           }),
         },
-        payload: { kind: "skillCollectionReview" },
-        // Main is the only valid target for a no-turn system-owned payload; the timer invokes the runner directly.
-        sessionTarget: "main",
+        payload: {
+          kind: "agentTurn",
+          message:
+            "Review the global Skill Workshop collection. Work only inside the Workshop directory provided for this turn.",
+        },
+        sessionTarget: "isolated",
         wakeMode: "next-heartbeat",
       },
     },

@@ -8,7 +8,7 @@ import { repeat } from "lit/directives/repeat.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 // Control UI view renders the Automations (cron) screen: a full-width list (stats, task table,
 // starter ideas) and a full-page detail view for creating or editing a single automation.
-import { isSystemOwnedCronPayloadKind } from "../../../../src/cron/types.js";
+import { isSystemOwnedCronDeclaration } from "../../../../src/cron/system-owned-declaration.js";
 import "../../styles/chat/text.css";
 import "../../styles/cron.css";
 import type {
@@ -798,7 +798,7 @@ function renderJobsTable(props: CronProps, hasAnyJobsFilters: boolean) {
 
 function renderJobRow(job: CronJob, props: CronProps) {
   const description = job.description?.trim();
-  const systemOwned = isSystemOwnedCronPayloadKind(job.payload.kind);
+  const systemOwned = isSystemOwnedCronDeclaration(job.declarationKey);
   const nextRunAtMs = job.state?.nextRunAtMs;
   const hasNextRun = typeof nextRunAtMs === "number" && Number.isFinite(nextRunAtMs);
   const nextRun = isCronJobRunning(job)
@@ -992,7 +992,7 @@ function renderJobMenu(props: CronProps, job: CronJob) {
   if (!props.canManage) {
     return nothing;
   }
-  const systemOwned = isSystemOwnedCronPayloadKind(job.payload.kind);
+  const systemOwned = isSystemOwnedCronDeclaration(job.declarationKey);
   return html`
     <wa-dropdown
       class="cron-job-menu"
@@ -1125,7 +1125,7 @@ function renderDetailView(props: CronProps, mode: CronPanelMode) {
 function renderDetailHeader(props: CronProps, mode: CronPanelMode, selectedJob?: CronJob) {
   const title = mode === "job" ? (selectedJob?.name ?? props.form.name) : t("cron.detail.newTitle");
   const description = mode === "job" ? selectedJob?.description?.trim() : undefined;
-  const systemOwned = isSystemOwnedCronPayloadKind(selectedJob?.payload.kind);
+  const systemOwned = isSystemOwnedCronDeclaration(selectedJob?.declarationKey);
   // Header describes the SAVED job (schedule + next run); the form's live
   // summary describes unsaved edits, so the two never contradict each other.
   const nextRunAtMs = selectedJob?.state?.nextRunAtMs;
@@ -1225,7 +1225,7 @@ function renderDetailTabs(props: CronProps) {
 function renderEditor(props: CronProps, mode: CronPanelMode) {
   const payloadLocked = props.form.payloadLocked;
   const systemOwned =
-    mode === "job" && isSystemOwnedCronPayloadKind(props.editingJob?.payload.kind);
+    mode === "job" && isSystemOwnedCronDeclaration(props.editingJob?.declarationKey);
   const isAgentTurn = !payloadLocked && props.form.payloadKind === "agentTurn";
   const supportsAnnounce =
     props.form.sessionTarget !== "main" &&
@@ -1345,7 +1345,6 @@ const CRON_PAYLOAD_CODE_LANGUAGES: Record<CronFormState["payloadKind"], string> 
   script: "javascript",
   command: "bash",
   heartbeat: "",
-  skillCollectionReview: "",
   systemEvent: "",
   agentTurn: "",
 };
@@ -1359,9 +1358,7 @@ function renderPromptSection(
       ? t("cron.form.script")
       : props.form.payloadKind === "heartbeat"
         ? "Heartbeat monitor"
-        : props.form.payloadKind === "skillCollectionReview"
-          ? "Skill collection review"
-          : t("cron.form.command");
+        : t("cron.form.command");
   const promptLabel = ctx.payloadLocked
     ? lockedPayloadLabel
     : props.form.payloadKind === "systemEvent"

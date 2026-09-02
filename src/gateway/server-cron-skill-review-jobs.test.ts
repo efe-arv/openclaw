@@ -1,10 +1,5 @@
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { createDeferred } from "../../test/helpers/promise.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { CronService } from "../cron/service.js";
 import type { CronJob } from "../cron/types.js";
 import { reconcileSkillCollectionReviewJobs } from "./server-cron-skill-review-jobs.js";
 
@@ -26,9 +21,9 @@ function monitorJob(agentId: string, id = `job-${agentId}`): CronJob {
     updatedAtMs: 1,
     agentId,
     schedule: { kind: "every", everyMs: 7 * 24 * 60 * 60_000 },
-    sessionTarget: "main",
+    sessionTarget: "isolated",
     wakeMode: "next-heartbeat",
-    payload: { kind: "skillCollectionReview" },
+    payload: { kind: "agentTurn", message: "Review the Workshop collection." },
     state: {},
   } as CronJob;
 }
@@ -71,91 +66,18 @@ describe("reconcileSkillCollectionReviewJobs", () => {
     expect(add.mock.calls[0]?.[0]).toMatchObject({
       declarationKey: "skill-collection-review:main",
       enabled: false,
-      payload: { kind: "skillCollectionReview" },
+      payload: {
+        kind: "agentTurn",
+        message:
+          "Review the global Skill Workshop collection. Work only inside the Workshop directory provided for this turn.",
+      },
     });
     expect(add.mock.calls[0]?.[1]).toMatchObject({
       enabledExplicit: true,
       systemOwned: true,
     });
     expect(remove).toHaveBeenCalledWith("job-stale", { systemOwned: true });
-    expect(remove).toHaveBeenCalledTimes(1);
-  });
-
-  it("revokes an active review through gateway reconciliation before its final write", async () => {
-    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-skill-review-revoke-"));
-    const workspaceDir = path.join(rootDir, "workspace");
-    const finalWritePath = path.join(workspaceDir, "skills", "candidate", "SKILL.md");
-    const started = createDeferred<AbortSignal>();
-    const release = createDeferred();
-    const settled = createDeferred();
-    const runSkillCollectionReview = vi.fn(
-      async ({ abortSignal }: { agentId: string; abortSignal?: AbortSignal }) => {
-        if (!abortSignal) {
-          throw new Error("skill review cancellation signal missing");
-        }
-        started.resolve(abortSignal);
-        try {
-          await release.promise;
-          abortSignal.throwIfAborted();
-          await fs.mkdir(path.dirname(finalWritePath), { recursive: true });
-          await fs.writeFile(finalWritePath, "review output", "utf8");
-          return { status: "ok" as const, summary: "reviewed main" };
-        } finally {
-          settled.resolve();
-        }
-      },
-    );
-    const cron = new CronService({
-      storePath: path.join(rootDir, "cron", "jobs.json"),
-      cronEnabled: true,
-      log: logger,
-      enqueueSystemEvent: vi.fn(),
-      requestHeartbeat: vi.fn(),
-      runIsolatedAgentJob: vi.fn(async () => ({ status: "ok" as const })),
-      runSkillCollectionReview,
-    });
-    const config = (mode: "auto" | "off") =>
-      ({
-        agents: {
-          list: [{ id: "main", default: true, workspace: workspaceDir }],
-        },
-        skills: { workshop: { autonomous: { mode } } },
-      }) satisfies OpenClawConfig;
-    let activeRun: Promise<unknown> | undefined;
-
-    try {
-      await cron.start();
-      await reconcileSkillCollectionReviewJobs({
-        cron,
-        cfg: config("auto"),
-        logger,
-      });
-      const monitor = (await cron.list({ includeDisabled: true })).find(
-        (job) => job.declarationKey === "skill-collection-review:main",
-      );
-      if (!monitor) {
-        throw new Error("skill review monitor missing after gateway reconciliation");
-      }
-
-      activeRun = cron.run(monitor.id, "force");
-      const abortSignal = await started.promise;
-      await reconcileSkillCollectionReviewJobs({
-        cron,
-        cfg: config("off"),
-        logger,
-      });
-
-      expect(abortSignal.aborted).toBe(true);
-      release.resolve();
-      await settled.promise;
-      await activeRun;
-      await expect(fs.access(finalWritePath)).rejects.toThrow();
-      expect(cron.getJob(monitor.id)?.enabled).toBe(false);
-    } finally {
-      release.resolve();
-      await activeRun?.catch(() => undefined);
-      cron.stop();
-      await fs.rm(rootDir, { recursive: true, force: true });
-    }
+    expect(remove).toHaveBeenCalledWith("user-job", { systemOwned: true });
+    expect(remove).toHaveBeenCalledTimes(2);
   });
 });

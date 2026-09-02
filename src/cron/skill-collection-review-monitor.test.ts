@@ -28,13 +28,13 @@ describe("resolveSkillCollectionReviewMonitorSpecs", () => {
       name: "skill-collection-review-main",
       displayName: "Skill collection review (main)",
       enabled: true,
-      payload: { kind: "skillCollectionReview" },
+      payload: { kind: "agentTurn", message: expect.any(String) },
       schedule: {
         kind: "every",
         everyMs: 7 * 24 * 60 * 60_000,
         anchorMs: expect.any(Number),
       },
-      sessionTarget: "main",
+      sessionTarget: "isolated",
       wakeMode: "next-heartbeat",
     });
     const repeated = resolveSkillCollectionReviewMonitorSpecs(cfg, {

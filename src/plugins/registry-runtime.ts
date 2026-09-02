@@ -507,7 +507,7 @@ export function createPluginRuntimeResolver(state: PluginRegistryState) {
             },
           } satisfies PluginRuntime["agent"]["session"];
           const runEmbeddedAgent: PluginRuntime["agent"]["runEmbeddedAgent"] = async (params) => {
-            const runParams = { ...params, skillWorkshopCollectionReconcile: undefined };
+            const runParams = { ...params };
             const { resolveRunSessionExecutionOwner } = await loadSessionOwnership();
             return await runWithPluginScope(async () => {
               const ownerPluginId = resolveRunSessionExecutionOwner(runParams);

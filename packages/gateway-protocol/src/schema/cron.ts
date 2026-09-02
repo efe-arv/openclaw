@@ -252,8 +252,7 @@ const CronPayloadSchema = Type.Union([
 ]);
 
 /**
- * Reported payloads add system-owned monitor kinds; they are
- * gateway-converged only, so create/patch schemas intentionally omit it.
+ * Reported payloads add the system-owned heartbeat monitor kind.
  */
 const CronReportedPayloadSchema = Type.Union([
   CronSystemEventPayloadSchema,
@@ -261,7 +260,6 @@ const CronReportedPayloadSchema = Type.Union([
   CronCommandPayloadSchema,
   CronScriptPayloadSchema,
   closedObject({ kind: Type.Literal("heartbeat") }),
-  closedObject({ kind: Type.Literal("skillCollectionReview") }),
 ]);
 
 /** Partial cron payload for job updates. */

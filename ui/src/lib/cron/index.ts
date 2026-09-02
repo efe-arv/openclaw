@@ -2,6 +2,7 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import { sortUniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { resolveCronTriggerMinIntervalMs } from "../../../../src/config/cron-limits.js";
+import { isSystemOwnedCronDeclaration } from "../../../../src/cron/system-owned-declaration.js";
 import { isSystemOwnedCronPayloadKind } from "../../../../src/cron/types.js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type {
@@ -65,13 +66,7 @@ export type CronFormState = {
   wakeMode: "next-heartbeat" | "now";
   // System-owned payloads are always payloadLocked; the form only
   // displays it, never submits it.
-  payloadKind:
-    | "systemEvent"
-    | "agentTurn"
-    | "command"
-    | "script"
-    | "heartbeat"
-    | "skillCollectionReview";
+  payloadKind: "systemEvent" | "agentTurn" | "command" | "script" | "heartbeat";
   payloadLocked: boolean;
   payloadText: string;
   payloadModel: string;
@@ -925,18 +920,19 @@ function parseStaggerSchedule(
   };
 }
 
-function isReadOnlyCronPayload(payload: CronPayload | null): boolean {
+function isReadOnlyCronPayload(payload: CronPayload | null, declarationKey?: string): boolean {
   return (
     payload?.kind === "command" ||
     payload?.kind === "script" ||
-    isSystemOwnedCronPayloadKind(payload?.kind)
+    isSystemOwnedCronPayloadKind(payload?.kind) ||
+    isSystemOwnedCronDeclaration(declarationKey)
   );
 }
 
 function jobToForm(job: CronJob, prev: CronFormState): CronFormState {
   const failureAlert = job.failureAlert;
   const payload = getCronJobPayload(job);
-  const payloadLocked = isReadOnlyCronPayload(payload);
+  const payloadLocked = isReadOnlyCronPayload(payload, job.declarationKey);
   if (!isCronFormSessionTarget(job.sessionTarget)) {
     throw new TypeError(`Invalid cron session target: ${job.sessionTarget}`);
   }
@@ -1235,7 +1231,9 @@ export async function addCronJob(state: CronState): Promise<CronSaveResult> {
           : sourceJob.schedule
         : buildCronSchedule(form);
     const preserveLockedPayload = Boolean(
-      editingJob && form.payloadLocked && isReadOnlyCronPayload(editingPayload),
+      editingJob &&
+      form.payloadLocked &&
+      isReadOnlyCronPayload(editingPayload, editingJob.declarationKey),
     );
     const payload = preserveLockedPayload ? undefined : buildCronPayload(form);
     if (payload?.kind === "agentTurn" && editingJob && editingPayload?.kind === "agentTurn") {

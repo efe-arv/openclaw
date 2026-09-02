@@ -1,7 +1,6 @@
 /** Tracks in-process cron executions so schedulers and wake paths avoid duplicate runs. */
 import type { CommandLaneTaskMarker } from "../process/command-queue.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
-import type { CronPayload } from "./types.js";
 
 type CronActiveJobState = {
   activeJobs: Map<string, CronActiveJobMarker>;
@@ -14,7 +13,7 @@ const CRON_ACTIVE_JOB_STATE_KEY = Symbol.for("openclaw.cron.activeJobs");
 
 export type CronActiveJobMarker = {
   jobId: string;
-  payloadKind?: CronPayload["kind"];
+  declarationKey?: string;
   generation: number;
   token: number;
   cancellation?:
@@ -94,7 +93,7 @@ function notifyCronJobInactive(marker: CronActiveJobMarker) {
 /** Marks a cron job id as currently executing for duplicate-run suppression. */
 export function markCronJobActive(
   jobId: string,
-  opts?: { payloadKind?: CronPayload["kind"]; preserveAcrossGenerationAdvance?: boolean },
+  opts?: { declarationKey?: string; preserveAcrossGenerationAdvance?: boolean },
 ): CronActiveJobMarker | undefined {
   if (!jobId) {
     return undefined;
@@ -104,7 +103,7 @@ export function markCronJobActive(
   state.nextToken += 1;
   const marker: CronActiveJobMarker = {
     jobId,
-    ...(opts?.payloadKind ? { payloadKind: opts.payloadKind } : {}),
+    ...(opts?.declarationKey ? { declarationKey: opts.declarationKey } : {}),
     generation: state.generation,
     token,
     ...(opts?.preserveAcrossGenerationAdvance ? { preserveAcrossGenerationAdvance: true } : {}),
@@ -185,15 +184,15 @@ export function requestActiveCronJobCancellation(jobId: string, reason: string):
   }
 }
 
-/** Revokes every active run admitted from one payload family. */
-export function requestActiveCronJobCancellationByPayloadKind(
-  payloadKind: CronPayload["kind"],
+/** Revokes every active run admitted from a declaration-key namespace. */
+export function requestActiveCronJobCancellationByDeclarationKeyPrefix(
+  declarationKeyPrefix: string,
   reason: string,
 ): void {
   const state = getCronActiveJobState();
   for (const marker of state.activeJobs.values()) {
     if (
-      marker.payloadKind !== payloadKind ||
+      !marker.declarationKey?.startsWith(declarationKeyPrefix) ||
       !isMarkerActiveInGeneration(marker, state.generation)
     ) {
       continue;
