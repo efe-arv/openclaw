@@ -103,45 +103,47 @@ Only a `pending` proposal can be revised, applied, rejected, or quarantined.
 
 ## Collection review
 
-In `auto` mode, the Gateway runs one system-owned cron job each week. The job
-appears in `openclaw cron list` and runs every
-7 days. Cron owns the cadence; the job is enabled only when
-`skills.workshop.autonomous.mode` is `auto`. The review can only read skills
-and submit one atomic collection reconciliation listing only changes. It keeps distinct useful skills,
-rewrites weak ones, consolidates overlap, and drops junk or stale fragments.
+In `auto` mode, the Gateway runs one system-owned isolated agent turn each week.
+The job appears in `openclaw cron list` and runs every 7 days. Cron owns the
+cadence; the job is enabled only when `skills.workshop.autonomous.mode` is
+`auto`. The turn has the normal agent tools and uses the full Workshop directory
+as its working directory, file-tool root, and session root. It keeps distinct
+useful skills, rewrites weak ones, consolidates overlap, and drops junk or stale
+fragments.
 Choosing `auto` intentionally authorizes those rewrites and drops without a
 second approval **for Workshop-owned paths only**; `propose` and `off` do not
 run collection review.
 
-The reviewer reads each skill it intends to change. Unlisted skills stay
-untouched. Every skill in the Workshop directory may receive `write` or `drop`.
-Collection review records its changes in review history and the backup manifest;
-it does not create proposal rows.
+The review prompt asks the agent to stay inside the Workshop directory. The
+agent edits files directly during this scheduled turn. A full-tree snapshot is
+created before the turn; changed or added `SKILL.md` files are scanned after it,
+and a failing file is restored from the snapshot while other safe changes stay.
+There is no collection-size cap.
 
 Recorded usage counts and last-used recency are supporting evidence, not an
 age-based lifecycle: heavy use favors preserving a skill's procedure, while no
 recorded use alone never justifies removing it.
 
-OpenClaw validates and scans every write before changing the Workshop directory,
-serializes collection edits with one global lease, and retains one backup
-under the state directory. The changed collection appears in new agent runs;
-running sessions keep their existing skill snapshot.
+OpenClaw serializes review and restore with one global lease and retains one
+latest full-tree backup under the state directory. Review history records the
+tree diff as kept, written, or dropped, including each drop reason. The changed
+collection appears in new agent runs; running sessions keep their existing
+skill snapshot.
+
+File tools use the Workshop directory as their containment root. Shell commands
+run with that directory as `cwd`, but the normal host shell authority applies;
+`cwd` does not physically jail shell commands, and no container is required.
 
 To undo the last completed cleanup, ask the agent to restore the skill
 collection. It uses `skill_workshop` action `restore_collection` under the same
 global lock. Restore refuses if any affected skill changed after cleanup.
 
-Each attempt is persisted under the global `workshop` review key before the
-model starts. Review is admitted only for collections of at most
-200 skills and 240,000 total `SKILL.md` bytes. Larger collections stay unchanged.
-The reconciled result must stay inside the same byte limit.
-
 Every completed review records its kept, written, and dropped skill names in
 the shared state database, including the reason for each drop. OpenClaw retains
 the latest 90 global outcomes.
 
-Collection rewrites and merges produce `SKILL.md` files at or below 10,000
-characters. A skill already above the cap can only become shorter.
+The prompt recommends keeping `SKILL.md` files around or under 10,000
+characters. This is guidance for the review, not an enforced collection cap.
 
 ## Chat
 
