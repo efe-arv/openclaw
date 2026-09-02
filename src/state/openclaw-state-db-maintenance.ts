@@ -384,39 +384,29 @@ function staleReleasedWorkshopClaims(db: DatabaseSync): void {
   }
 }
 
-function removeLegacySkillCollectionReviewJobs(db: DatabaseSync, previousVersion: number): boolean {
-  if (previousVersion >= 16 || !tableExists(db, "cron_jobs")) {
+function removeLegacySkillCollectionReviewJobs(db: DatabaseSync): boolean {
+  if (!tableExists(db, "cron_jobs")) {
     return false;
   }
+  // Gateway convergence rebuilds the system-owned review job as a normal agent turn on
+  // start, so the retired payload kind is dropped rather than translated.
   const legacyJobs = db
     .prepare(
-      `SELECT 1
+      `SELECT store_key, job_id
          FROM cron_jobs
         WHERE payload_kind = 'skillCollectionReview'
-           OR (json_valid(job_json) AND json_extract(job_json, '$.payload.kind') = 'skillCollectionReview')
-        LIMIT 1`,
+           OR (json_valid(job_json) AND json_extract(job_json, '$.payload.kind') = 'skillCollectionReview')`,
     )
-    .all();
-  if (tableExists(db, "cron_job_scratch")) {
-    db.exec(`
-      DELETE FROM cron_job_scratch
-       WHERE EXISTS (
-         SELECT 1
-           FROM cron_jobs
-          WHERE cron_jobs.store_key = cron_job_scratch.store_key
-            AND cron_jobs.job_id = cron_job_scratch.job_id
-            AND (
-              cron_jobs.payload_kind = 'skillCollectionReview'
-              OR (json_valid(cron_jobs.job_json) AND json_extract(cron_jobs.job_json, '$.payload.kind') = 'skillCollectionReview')
-            )
-       );
-    `);
+    .all() as Array<{ store_key: string; job_id: string }>;
+  const tables = tableExists(db, "cron_job_scratch")
+    ? ["cron_job_scratch", "cron_jobs"]
+    : ["cron_jobs"];
+  for (const table of tables) {
+    const remove = db.prepare(`DELETE FROM ${table} WHERE store_key = ? AND job_id = ?`);
+    for (const job of legacyJobs) {
+      remove.run(job.store_key, job.job_id);
+    }
   }
-  db.exec(`
-    DELETE FROM cron_jobs
-     WHERE payload_kind = 'skillCollectionReview'
-        OR (json_valid(job_json) AND json_extract(job_json, '$.payload.kind') = 'skillCollectionReview');
-  `);
   return legacyJobs.length > 0;
 }
 
@@ -428,7 +418,7 @@ function migrateSkillWorkshopDirectoryOwnership(
   if (previousVersion >= 16) {
     return false;
   }
-  const removedLegacyJobs = removeLegacySkillCollectionReviewJobs(db, previousVersion);
+  const removedLegacyJobs = removeLegacySkillCollectionReviewJobs(db);
   const proposalColumns = ["workspace_dir", "claim_released_time"].filter((column) =>
     tableHasColumn(db, "skill_workshop_proposals", column),
   );
