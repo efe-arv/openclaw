@@ -187,12 +187,13 @@ export function projectModelAuthStatusProvider(params: {
   };
 }
 
-export function resolveConfigBoundProfileIds(
+export function resolveConfigBoundAuthBindings(
   config: OpenClawConfig,
   store: AuthProfileStore,
   authAliasLookupParams?: ProviderAuthAliasLookupParams,
-): Set<string> {
+): { profileIds: Set<string>; authProviders: Set<string> } {
   const profileIds = new Set<string>();
+  const authProviders = new Set<string>();
   for (const provider of Object.keys(config.models?.providers ?? {})) {
     const reference = resolveProviderEntryApiKeyProfileReference({
       cfg: config,
@@ -202,9 +203,10 @@ export function resolveConfigBoundProfileIds(
     });
     if (reference.kind === "profile" || reference.kind === "profile-incompatible") {
       profileIds.add(reference.profileId);
+      authProviders.add(resolveProviderIdForAuth(provider, authAliasLookupParams));
     }
   }
-  return profileIds;
+  return { profileIds, authProviders };
 }
 
 export function resolveConfiguredProviders(

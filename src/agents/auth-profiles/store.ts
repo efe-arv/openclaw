@@ -1381,6 +1381,7 @@ export function findPersistedAuthProfileCredential(params: {
 /** Resolve which agent dir owns a persisted profile, accounting for inherited OAuth. */
 export function resolvePersistedAuthProfileOwnerAgentDir(params: {
   agentDir?: string;
+  inheritedAuthDir?: string;
   profileId: string;
 }): string | undefined {
   if (isEnvOnlyAuthProfileRuntime()) {
@@ -1391,23 +1392,30 @@ export function resolvePersistedAuthProfileOwnerAgentDir(params: {
     return undefined;
   }
   const requestedStore = loadPersistedAuthProfileStore(agentDir);
-  if (isSharedMainAuthProfileAgentDir(agentDir)) {
-    return undefined;
+  const inheritedAgentDir = params.inheritedAuthDir
+    ? resolveRuntimeAuthProfileAgentDir(params.inheritedAuthDir)
+    : resolveRuntimeAuthProfileAgentDir();
+  const inheritedOwnerAgentDir = params.inheritedAuthDir ? inheritedAgentDir : undefined;
+  const requestedAuthPath = resolveAgentAuthPath(agentDir);
+  const inheritedAuthPath = inheritedAgentDir
+    ? resolveAgentAuthPath(inheritedAgentDir)
+    : resolveSharedAuthPath();
+  if (requestedAuthPath === inheritedAuthPath) {
+    return inheritedOwnerAgentDir;
   }
 
-  const mainAgentDir = resolveRuntimeAuthProfileAgentDir();
-  const mainStore = loadPersistedAuthProfileStore(mainAgentDir);
+  const inheritedStore = loadPersistedAuthProfileStore(inheritedAgentDir);
   const requestedProfile = requestedStore?.profiles[params.profileId];
   if (requestedProfile) {
     return shouldUseMainOwnerForLocalOAuthCredential({
       local: requestedProfile,
-      main: mainStore?.profiles[params.profileId],
+      main: inheritedStore?.profiles[params.profileId],
     })
-      ? undefined
+      ? inheritedOwnerAgentDir
       : agentDir;
   }
 
-  return mainStore?.profiles[params.profileId] ? undefined : agentDir;
+  return inheritedStore?.profiles[params.profileId] ? inheritedOwnerAgentDir : agentDir;
 }
 
 /** Load the store shape used when applying local-only auth updates. */

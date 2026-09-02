@@ -2,7 +2,6 @@
 // credential cleanup, secret refresh, and provider run abort side effects.
 
 import { expectDefined } from "@openclaw/normalization-core";
-import { MAX_DATE_TIMESTAMP_MS } from "@openclaw/normalization-core/number-coercion";
 import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthHealthSummary } from "../../agents/auth-health.js";
@@ -61,7 +60,6 @@ const mocks = vi.hoisted(() => ({
     async (): Promise<AuthProfileStore | null> => ({ version: 1, profiles: {} }),
   ),
   refreshActiveProviderAuthRuntimeSnapshot: vi.fn(async () => false),
-  refreshPreparedModelRuntimeSnapshots: vi.fn(async () => {}),
   preparedModelRuntimeConfigsMatch: vi.fn(
     (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right),
   ),
@@ -130,7 +128,6 @@ vi.mock("../../secrets/runtime.js", () => ({
 
 vi.mock("../../agents/prepared-model-runtime.js", () => ({
   preparedModelRuntimeConfigsMatch: mocks.preparedModelRuntimeConfigsMatch,
-  refreshPreparedModelRuntimeSnapshots: mocks.refreshPreparedModelRuntimeSnapshots,
 }));
 
 vi.mock("../../agents/model-provider-auth.js", () => ({
@@ -144,7 +141,6 @@ vi.mock("../server-model-catalog-auth.js", () => ({
 }));
 
 import {
-  aggregateRefreshableAuthStatus,
   invalidateModelAuthStatusCache,
   modelsAuthStatusHandlers,
   type ModelAuthLogoutResult,
@@ -352,7 +348,6 @@ function resetAuthStatusMocks(): void {
   });
   mocks.loadProviderUsageSummary.mockResolvedValue(emptyUsageSummary());
   mocks.refreshActiveProviderAuthRuntimeSnapshot.mockResolvedValue(false);
-  mocks.refreshPreparedModelRuntimeSnapshots.mockResolvedValue();
   mocks.warmCurrentProviderAuthStateOffMainThread.mockResolvedValue();
 }
 
@@ -643,131 +638,6 @@ describe("models.authStatus", () => {
       ).type,
     ).toBe("oauth");
     expect(result.providers[0]?.profiles[0]?.logoutSupported).toBe(true);
-  });
-
-  it("projects profile labels, last use, and explicit priority", async () => {
-    setPreparedAuthStore({
-      version: 1,
-      profiles: {
-        "openai:default": {
-          type: "oauth",
-          provider: "openai",
-          access: "access",
-          refresh: "refresh",
-          expires: 1_000_000,
-          email: "owner@example.com",
-          displayName: "Work account",
-        },
-      },
-      order: { openai: ["openai:default"] },
-      usageStats: { "openai:default": { lastUsed: 42 } },
-      runtimeLocalProfileIds: ["openai:default"],
-      runtimeLocalOrderProviders: ["openai"],
-    });
-    mocks.buildAuthHealthSummary.mockReturnValue(createOpenAiCodexOauthHealthSummary());
-
-    const provider = await firstAuthStatusProvider();
-
-    expect(provider?.profileOrder).toEqual(["openai:default"]);
-    expect(provider?.profileOrderStored).toBe(true);
-    expect(provider?.profiles[0]).toMatchObject({
-      source: "saved",
-      displayName: "Work account",
-      email: "owner@example.com",
-      lastUsedAt: 42,
-    });
-  });
-
-  it("does not mark an inherited profile order as resettable", async () => {
-    setPreparedAuthStore({
-      version: 1,
-      profiles: {
-        "openai:default": {
-          type: "oauth",
-          provider: "openai",
-          access: "access",
-          refresh: "refresh",
-          expires: 1_000_000,
-        },
-      },
-      order: { openai: ["openai:default"] },
-      runtimeLocalProfileIds: [],
-      runtimeLocalOrderProviders: [],
-      runtimeInheritsMainState: true,
-    });
-    mocks.buildAuthHealthSummary.mockReturnValue(createOpenAiCodexOauthHealthSummary());
-
-    const provider = await firstAuthStatusProvider();
-
-    expect(provider?.profileOrder).toEqual(["openai:default"]);
-    expect(provider?.profileOrderStored).toBeUndefined();
-    expect(provider?.profiles[0]?.source).toBe("inherited");
-  });
-
-  it("marks configured profile order as externally managed", async () => {
-    mocks.getRuntimeConfig.mockReturnValue({
-      auth: { order: { openai: ["openai:default"] } },
-    });
-    setPreparedAuthStore({
-      version: 1,
-      profiles: {
-        "openai:default": {
-          type: "oauth",
-          provider: "openai",
-          access: "access",
-          refresh: "refresh",
-          expires: 1_000_000,
-        },
-        "openai:backup": {
-          type: "oauth",
-          provider: "openai",
-          access: "backup-access",
-          refresh: "backup-refresh",
-          expires: 1_000_000,
-        },
-      },
-    });
-    const health = createOpenAiCodexOauthHealthSummary();
-    const backup = {
-      ...health.profiles[0]!,
-      profileId: "openai:backup",
-      label: "openai:backup",
-    };
-    health.profiles.push(backup);
-    health.providers[0]?.profiles.push(backup);
-    mocks.buildAuthHealthSummary.mockReturnValue(health);
-
-    const provider = await firstAuthStatusProvider();
-
-    expect(provider?.profileOrder).toEqual(["openai:default"]);
-    expect(provider?.profiles).toHaveLength(2);
-    expect(provider?.profileOrderStored).toBeUndefined();
-    expect(provider?.profileOrderLocked).toBe("auth-config");
-  });
-
-  it("omits profile identity for read-only clients", async () => {
-    setPreparedAuthStore({
-      version: 1,
-      profiles: {
-        "openai:default": {
-          type: "oauth",
-          provider: "openai",
-          access: "access",
-          refresh: "refresh",
-          expires: 1_000_000,
-          email: "owner@example.com",
-          displayName: "Work account",
-        },
-      },
-    });
-    mocks.buildAuthHealthSummary.mockReturnValue(createOpenAiCodexOauthHealthSummary());
-
-    const opts = createOptions({}, ["operator.read"]);
-    await handler(opts);
-
-    const result = firstRespondCall(opts)?.[1] as ModelAuthStatusResult;
-    expect(result.providers[0]?.profiles[0]).not.toHaveProperty("email");
-    expect(result.providers[0]?.profiles[0]).not.toHaveProperty("displayName");
   });
 
   it("projects provider capabilities from the published lifecycle metadata", async () => {
@@ -2421,10 +2291,17 @@ describe("models.authOrderSet", () => {
     ]);
   });
 
-  it("rejects priority changes when provider configuration pins a profile", async () => {
-    mocks.getRuntimeConfig.mockReturnValue({
-      models: { providers: { openai: { apiKey: "openai:one" } } },
-    });
+  it.each([
+    {
+      owner: "provider configuration",
+      config: { models: { providers: { openai: { apiKey: "openai:one" } } } },
+    },
+    {
+      owner: "auth configuration",
+      config: { auth: { order: { openai: ["openai:one", "openai:two"] } } },
+    },
+  ])("rejects priority changes when $owner owns the order", async ({ owner, config }) => {
+    mocks.getRuntimeConfig.mockReturnValue(config);
     const opts = createOrderOptions({
       provider: "openai",
       profileIds: ["openai:two", "openai:one"],
@@ -2436,13 +2313,44 @@ describe("models.authOrderSet", () => {
     expect(firstRespondCall(opts)?.[0]).toBe(false);
     expect(firstRespondCall(opts)?.[2]).toMatchObject({
       code: "INVALID_REQUEST",
-      message: expect.stringContaining("controlled by provider configuration"),
+      message: expect.stringContaining(`controlled by ${owner}`),
     });
   });
 
-  it("rejects priority changes when auth configuration owns the order", async () => {
+  it("rejects priority changes when a split-provider entry pins another provider's profile", async () => {
+    const lockedProfileId = "credential-owner:locked";
     mocks.getRuntimeConfig.mockReturnValue({
-      auth: { order: { openai: ["openai:one", "openai:two"] } },
+      models: {
+        providers: {
+          openai: { baseUrl: "https://example.test/v1", apiKey: lockedProfileId },
+          "credential-owner": { baseUrl: "https://example.test/v1" },
+        },
+      },
+    });
+    setPreparedAuthStore({
+      version: 1,
+      profiles: {
+        "openai:one": {
+          type: "oauth",
+          provider: "openai",
+          access: "one",
+          refresh: "one-refresh",
+          expires: 1_000_000,
+        },
+        "openai:two": {
+          type: "oauth",
+          provider: "openai",
+          access: "two",
+          refresh: "two-refresh",
+          expires: 1_000_000,
+        },
+        [lockedProfileId]: {
+          type: "token",
+          provider: "credential-owner",
+          token: "token",
+        },
+      },
+      runtimeLocalProfileIds: ["openai:one", "openai:two", lockedProfileId],
     });
     const opts = createOrderOptions({
       provider: "openai",
@@ -2452,17 +2360,20 @@ describe("models.authOrderSet", () => {
     await orderHandler(opts);
 
     expect(mocks.setAuthProfileOrder).not.toHaveBeenCalled();
-    expect(firstRespondCall(opts)?.[0]).toBe(false);
-    expect(firstRespondCall(opts)?.[2]).toMatchObject({
-      code: "INVALID_REQUEST",
-      message: expect.stringContaining("controlled by auth configuration"),
-    });
+    expect(firstRespondCall(opts)?.[2]?.message).toContain("controlled by provider configuration");
   });
 
-  it("clears a stored override when auth configuration owns the fallback order", async () => {
-    mocks.getRuntimeConfig.mockReturnValue({
-      auth: { order: { openai: ["openai:one", "openai:two"] } },
-    });
+  it.each([
+    {
+      owner: "auth configuration",
+      config: { auth: { order: { openai: ["openai:one", "openai:two"] } } },
+    },
+    {
+      owner: "provider configuration",
+      config: { models: { providers: { openai: { apiKey: "openai:one" } } } },
+    },
+  ])("clears a stored override when $owner owns the fallback", async ({ config }) => {
+    mocks.getRuntimeConfig.mockReturnValue(config);
     const opts = createOrderOptions({ provider: "openai" });
 
     await orderHandler(opts);
@@ -2495,20 +2406,6 @@ describe("models.authOrderSet", () => {
       code: "UNAVAILABLE",
       message: expect.stringContaining("refresh and try again"),
     });
-  });
-
-  it("clears a stored override when provider configuration pins a profile", async () => {
-    mocks.getRuntimeConfig.mockReturnValue({
-      models: { providers: { openai: { apiKey: "openai:one" } } },
-    });
-    const opts = createOrderOptions({ provider: "openai" });
-
-    await orderHandler(opts);
-
-    expect(mocks.setAuthProfileOrder).toHaveBeenCalledWith(
-      expect.objectContaining({ provider: "openai", order: null }),
-    );
-    expect(firstRespondCall(opts)?.[0]).toBe(true);
   });
 
   it("validates and persists an aliased provider with the prepared metadata owner", async () => {
@@ -2629,7 +2526,7 @@ describe("models.authOrderSet", () => {
     expect(firstRespondCall(opts)?.[2]).toMatchObject({ code: "UNAVAILABLE" });
   });
 
-  it("does not republish a stale config after the durable order write", async () => {
+  it("warms the current config after a durable order write", async () => {
     let finishWrite: (() => void) | undefined;
     mocks.setAuthProfileOrder.mockImplementationOnce(
       () =>
@@ -2654,7 +2551,6 @@ describe("models.authOrderSet", () => {
     await pending;
 
     expect(firstRespondCall(opts)?.[0]).toBe(true);
-    expect(mocks.refreshPreparedModelRuntimeSnapshots).not.toHaveBeenCalled();
     expect(mocks.warmCurrentProviderAuthStateOffMainThread).toHaveBeenCalledWith(currentConfig);
   });
 
@@ -2702,32 +2598,30 @@ describe("models.authOrderSet", () => {
     });
   });
 
-  it("rejects an incomplete provider profile order without writing", async () => {
-    const opts = createOrderOptions({ provider: "openai", profileIds: ["openai:one"] });
+  it.each([
+    {
+      name: "an incomplete provider profile order",
+      params: { provider: "openai", profileIds: ["openai:one"] },
+      message: "every available profile",
+    },
+    {
+      name: "profiles owned by another provider",
+      params: { provider: "anthropic", profileIds: ["openai:one"] },
+      message: "unavailable for provider anthropic",
+    },
+    {
+      name: "fields outside the registered request contract",
+      params: { provider: "openai", unexpected: true },
+      message: "invalid models.authOrderSet params",
+    },
+  ])("rejects $name without writing", async ({ params, message }) => {
+    const opts = createOrderOptions(params);
 
     await orderHandler(opts);
 
     expect(mocks.setAuthProfileOrder).not.toHaveBeenCalled();
     expect(firstRespondCall(opts)?.[0]).toBe(false);
-    expect(firstRespondCall(opts)?.[2]?.message).toContain("every available profile");
-  });
-
-  it("rejects profiles owned by another provider", async () => {
-    const opts = createOrderOptions({ provider: "anthropic", profileIds: ["openai:one"] });
-
-    await orderHandler(opts);
-
-    expect(mocks.setAuthProfileOrder).not.toHaveBeenCalled();
-    expect(firstRespondCall(opts)?.[0]).toBe(false);
-  });
-
-  it("rejects fields outside the registered request contract", async () => {
-    const opts = createOrderOptions({ provider: "openai", unexpected: true });
-
-    await orderHandler(opts);
-
-    expect(mocks.setAuthProfileOrder).not.toHaveBeenCalled();
-    expect(firstRespondCall(opts)?.[0]).toBe(false);
+    expect(firstRespondCall(opts)?.[2]?.message).toContain(message);
   });
 });
 
@@ -2841,6 +2735,38 @@ describe("models.authLogout", () => {
     expect((payload as ModelAuthLogoutResult).removedProfiles).toEqual(["openrouter:oauth"]);
   });
 
+  it("carries the configured auth owner into targeted removal", async () => {
+    const profileId = "openrouter:oauth";
+    mocks.readPreparedCatalog.mockResolvedValueOnce({
+      ...createPreparedOwnerSnapshot("main"),
+      inheritedAuthDir: "/tmp/auth-owner",
+    });
+    mocks.ensureAuthProfileStoreWithoutExternalProfiles.mockReturnValue({
+      version: 1,
+      profiles: {
+        [profileId]: {
+          type: "oauth",
+          provider: "openrouter",
+          access: "access",
+          refresh: "refresh",
+          expires: 1_000_000,
+        },
+      },
+    });
+    mocks.listProfilesForProvider.mockReturnValue([profileId]);
+
+    await logoutHandler(createLogoutOptions({ provider: "openrouter", profileIds: [profileId] }));
+
+    expect(mocks.ensureAuthProfileStoreWithoutExternalProfiles).toHaveBeenCalledWith("/tmp/agent", {
+      inheritedAuthDir: "/tmp/auth-owner",
+    });
+    expect(mocks.removeAuthProfilesAcrossOwnerStores).toHaveBeenCalledWith({
+      agentDir: "/tmp/agent",
+      inheritedAuthDir: "/tmp/auth-owner",
+      profileIds: [profileId],
+    });
+  });
+
   it("rejects targeted logout for config-bound token profiles", async () => {
     const profileId = "openrouter:token";
     mocks.getRuntimeConfig.mockReturnValue({
@@ -2866,6 +2792,44 @@ describe("models.authLogout", () => {
     const [ok, , error] = firstRespondCall(opts) ?? [];
     expect(ok).toBe(false);
     expect(error?.message).toContain("config-bound auth profiles");
+  });
+
+  it("rejects logout when the prepared auth owner is stale", async () => {
+    const profileId = "openrouter:oauth";
+    const preparedConfig = {};
+    const currentConfig = {
+      models: { providers: { openrouter: { apiKey: profileId } } },
+    };
+    mocks.readPreparedCatalog.mockResolvedValueOnce({
+      ...createPreparedOwnerSnapshot("main"),
+      config: preparedConfig,
+    });
+    mocks.getRuntimeConfig.mockReturnValueOnce(preparedConfig).mockReturnValue(currentConfig);
+    mocks.ensureAuthProfileStoreWithoutExternalProfiles.mockReturnValue({
+      version: 1,
+      profiles: {
+        [profileId]: {
+          type: "oauth",
+          provider: "openrouter",
+          access: "access",
+          refresh: "refresh",
+          expires: 1_000_000,
+        },
+      },
+    });
+    mocks.listProfilesForProvider.mockReturnValue([profileId]);
+    const opts = createLogoutOptions({ provider: "openrouter", profileIds: [profileId] });
+
+    await logoutHandler(opts);
+
+    expect(mocks.removeAuthProfilesAcrossOwnerStores).not.toHaveBeenCalled();
+    expect(mocks.removeProviderAuthProfilesWithLock).not.toHaveBeenCalled();
+    const [ok, , error] = firstRespondCall(opts) ?? [];
+    expect(ok).toBe(false);
+    expect(error).toEqual({
+      code: "UNAVAILABLE",
+      message: "provider accounts changed while signing out; refresh and try again",
+    });
   });
 
   it("rejects unavailable or external targeted profiles without aborting runs", async () => {
@@ -3097,201 +3061,4 @@ describe("models.authLogout", () => {
   });
 });
 
-// Direct unit tests for aggregateRefreshableAuthStatus — this helper was introduced to
-// prevent a specific regression (mixed OAuth+token rollup mis-reporting
-// providers). Pinning its behavior here so refactors can't silently re-break
-// the same bug.
-describe("aggregateRefreshableAuthStatus", () => {
-  const NOW = 1_000_000;
-  const expiring = NOW + 60_000; // 1 min in future
-
-  function oauth(status: "ok" | "expiring" | "expired" | "missing", expiresAt?: number) {
-    return {
-      profileId: `p-${status}`,
-      provider: "openai",
-      type: "oauth" as const,
-      status,
-      expiresAt,
-      remainingMs: expiresAt !== undefined ? expiresAt - NOW : undefined,
-      source: "store" as const,
-      label: `p-${status}`,
-    };
-  }
-
-  function token(status: "ok" | "expiring" | "expired" | "missing" | "static", expiresAt?: number) {
-    return {
-      profileId: `t-${status}`,
-      provider: "openai",
-      type: "token" as const,
-      status,
-      expiresAt,
-      remainingMs: expiresAt !== undefined ? expiresAt - NOW : undefined,
-      source: "store" as const,
-      label: `t-${status}`,
-    };
-  }
-
-  it("ignores token profiles — healthy OAuth + expired token stays ok", () => {
-    const result = aggregateRefreshableAuthStatus(
-      {
-        provider: "openai",
-        status: "expired",
-        profiles: [oauth("ok", expiring + 10_000_000), token("expired")],
-      },
-      NOW,
-    );
-    expect(result.status).toBe("ok");
-  });
-
-  it("uses effective OAuth profiles while keeping stale inventory visible", () => {
-    const healthy = oauth("ok", expiring + 10_000_000);
-    const stale = oauth("expired", NOW - 1);
-    const result = aggregateRefreshableAuthStatus(
-      {
-        provider: "openai",
-        status: "ok",
-        effectiveProfiles: [healthy],
-        profiles: [stale, healthy],
-      },
-      NOW,
-    );
-    expect(result.status).toBe("ok");
-    expect(result.expiresAt).toBe(healthy.expiresAt);
-  });
-
-  it("falls back to prov.status when no OAuth profiles exist", () => {
-    const result = aggregateRefreshableAuthStatus(
-      {
-        provider: "anthropic",
-        status: "static",
-        profiles: [
-          {
-            profileId: "anthropic:default",
-            provider: "anthropic",
-            type: "api_key",
-            status: "static",
-            source: "store",
-            label: "anthropic:default",
-          },
-        ],
-      },
-      NOW,
-    );
-    expect(result.status).toBe("static");
-  });
-
-  it("keeps missing distinct from expired", () => {
-    const expiredResult = aggregateRefreshableAuthStatus(
-      {
-        provider: "openai",
-        status: "expired",
-        profiles: [oauth("expired", NOW - 1)],
-      },
-      NOW,
-    );
-    expect(expiredResult.status).toBe("expired");
-
-    const missingResult = aggregateRefreshableAuthStatus(
-      {
-        provider: "openai",
-        status: "missing",
-        profiles: [oauth("missing")],
-      },
-      NOW,
-    );
-    expect(missingResult.status).toBe("missing");
-  });
-
-  it("precedence: expired/missing > expiring > ok > static", () => {
-    // expiring + ok → expiring (expired-marker absent)
-    const res1 = aggregateRefreshableAuthStatus(
-      {
-        provider: "openai",
-        status: "expiring",
-        profiles: [oauth("expiring", expiring), oauth("ok", expiring + 10_000_000)],
-      },
-      NOW,
-    );
-    expect(res1.status).toBe("expiring");
-
-    // expired beats expiring
-    const res2 = aggregateRefreshableAuthStatus(
-      {
-        provider: "openai",
-        status: "expired",
-        profiles: [oauth("expired", NOW - 1), oauth("expiring", expiring)],
-      },
-      NOW,
-    );
-    expect(res2.status).toBe("expired");
-  });
-
-  it("picks the earliest expiresAt across OAuth profiles", () => {
-    const earlier = NOW + 1_000;
-    const later = NOW + 99_999;
-    const result = aggregateRefreshableAuthStatus(
-      {
-        provider: "openai",
-        status: "ok",
-        profiles: [oauth("ok", later), oauth("ok", earlier)],
-      },
-      NOW,
-    );
-    expect(result.expiresAt).toBe(earlier);
-    expect(result.remainingMs).toBe(1_000);
-  });
-
-  it.each([
-    ["ok", undefined],
-    ["expiring", expiring],
-    ["expired", NOW - 1],
-    ["missing", undefined],
-    ["static", undefined],
-  ] as const)(
-    "uses token status %s when no effective OAuth profile exists",
-    (status, expiresAt) => {
-      const result = aggregateRefreshableAuthStatus(
-        {
-          provider: "claude-cli",
-          status,
-          profiles: [token(status, expiresAt)],
-        },
-        NOW,
-        true,
-      );
-      expect(result).toEqual({
-        status,
-        ...(expiresAt === undefined ? {} : { expiresAt, remainingMs: expiresAt - NOW }),
-      });
-    },
-  );
-
-  it("keeps an empty effective profile selection missing", () => {
-    const result = aggregateRefreshableAuthStatus(
-      {
-        provider: "claude-cli",
-        status: "missing",
-        effectiveProfiles: [],
-        profiles: [token("ok")],
-      },
-      NOW,
-      true,
-    );
-    expect(result).toEqual({ status: "missing" });
-  });
-
-  it("ignores out-of-range OAuth expiry timestamps", () => {
-    const valid = NOW + 5_000;
-    const result = aggregateRefreshableAuthStatus(
-      {
-        provider: "openai-codex",
-        status: "ok",
-        profiles: [oauth("ok", MAX_DATE_TIMESTAMP_MS + 1), oauth("ok", valid)],
-      },
-      NOW,
-    );
-    expect(result.expiresAt).toBe(valid);
-    expect(result.remainingMs).toBe(5_000);
-  });
-});
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */

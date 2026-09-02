@@ -50,6 +50,7 @@ import {
 import {
   captureAuthProfileStorePersistenceSnapshot,
   ensureAuthProfileStoreWithoutExternalProfiles,
+  getPreparedRuntimeAuthProfileStoreSnapshot,
   getRuntimeAuthProfileStoreSnapshot,
   loadAuthProfileStoreForRuntime,
   loadAuthProfileStoreWithoutExternalProfiles,
@@ -1788,6 +1789,46 @@ describe("promoteAuthProfileInOrder", () => {
     });
   });
 
+  it("removes an inherited profile from a configured auth owner", async () => {
+    await withAuthProfileTestState(
+      "openclaw-auth-remove-configured-owner-",
+      async ({ agentDirFor }) => {
+        const inheritedAuthDir = agentDirFor("auth-owner");
+        const customAgentDir = agentDirFor("custom");
+        const profileId = "openai:shared";
+        fs.mkdirSync(inheritedAuthDir, { recursive: true });
+        fs.mkdirSync(customAgentDir, { recursive: true });
+        saveAuthProfileStore(
+          {
+            version: AUTH_STORE_VERSION,
+            profiles: {
+              [profileId]: {
+                type: "oauth",
+                provider: "openai",
+                access: "inherited-access",
+                refresh: "inherited-refresh",
+                expires: Date.now() + 60_000,
+              },
+            },
+          },
+          inheritedAuthDir,
+        );
+
+        const removed = await removeAuthProfilesAcrossOwnerStores({
+          agentDir: customAgentDir,
+          inheritedAuthDir,
+          profileIds: [profileId],
+        });
+
+        expect(removed).toBe(true);
+        expect(
+          loadPersistedAuthProfileStore(inheritedAuthDir)?.profiles[profileId],
+        ).toBeUndefined();
+      },
+      { clearOAuthDir: true },
+    );
+  });
+
   it("does not clear lastGood when the failed profile is not the stored profile", async () => {
     await withAuthProfileTestState("openclaw-auth-clear-lastgood-keep-", async ({ agentDir }) => {
       fs.mkdirSync(agentDir, { recursive: true });
@@ -2027,16 +2068,24 @@ describe("setAuthProfileOrder", () => {
         }) as RuntimeAuthProfileStore;
         expect(inheritedView.order?.openai).toEqual([profileId]);
         expect(inheritedView.runtimeLocalOrderProviders).toEqual([]);
+        replaceRuntimeAuthProfileStoreSnapshots([
+          { agentDir: customAgentDir, store: inheritedView },
+        ]);
 
-        await expect(
-          setAuthProfileOrder({
-            agentDir: customAgentDir,
-            inheritedAuthDir,
-            provider: "openai",
-            order: [profileId],
-            membershipGuard: { effectiveProfileIds: [profileId], localProfileIds: [] },
-          }),
-        ).resolves.toMatchObject({ order: { openai: [profileId] } });
+        await setAuthProfileOrder({
+          agentDir: customAgentDir,
+          inheritedAuthDir,
+          provider: "openai",
+          order: [profileId],
+          membershipGuard: { effectiveProfileIds: [profileId], localProfileIds: [] },
+        });
+
+        const published = getPreparedRuntimeAuthProfileStoreSnapshot(
+          customAgentDir,
+          inheritedAuthDir,
+        ) as RuntimeAuthProfileStore;
+        expect(published.order?.openai).toEqual([profileId]);
+        expect(published.runtimeLocalOrderProviders).toEqual(["openai"]);
       },
       { clearOAuthDir: true },
     );

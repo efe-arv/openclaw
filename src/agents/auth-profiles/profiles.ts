@@ -371,6 +371,7 @@ export async function removeAuthProfilesWithLock(params: {
  */
 export async function removeAuthProfilesAcrossOwnerStores(params: {
   agentDir?: string;
+  inheritedAuthDir?: string;
   profileIds: readonly string[];
 }): Promise<boolean> {
   const profilesByOwner = new Map<string | undefined, Set<string>>([
@@ -379,6 +380,7 @@ export async function removeAuthProfilesAcrossOwnerStores(params: {
   for (const profileId of params.profileIds) {
     const ownerAgentDir = resolvePersistedAuthProfileOwnerAgentDir({
       agentDir: params.agentDir,
+      ...(params.inheritedAuthDir ? { inheritedAuthDir: params.inheritedAuthDir } : {}),
       profileId,
     });
     const ownerProfiles = profilesByOwner.get(ownerAgentDir) ?? new Set<string>();

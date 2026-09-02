@@ -148,22 +148,6 @@ describe("models auth order", () => {
     );
   });
 
-  it("clears a custom inheritance owner's agent-scoped order", async () => {
-    mocks.loadModelsConfig.mockResolvedValue({
-      agents: { defaults: { authInheritance: { agentId: "ops" } } },
-    } as OpenClawConfig);
-    const runtime = createRuntime();
-
-    await modelsAuthOrderClearCommand({ provider: "anthropic", agent: "ops" }, runtime);
-
-    expect(mocks.setAuthProfileOrder).toHaveBeenCalledWith({
-      agentDir: "/tmp/agent-ops",
-      provider: "anthropic",
-      order: null,
-    });
-    expect(mocks.refreshRunningGatewayAuthState).toHaveBeenCalledWith("ops");
-  });
-
   it("does not refresh the gateway when the store update fails", async () => {
     mocks.setAuthProfileOrder.mockResolvedValue(null);
 

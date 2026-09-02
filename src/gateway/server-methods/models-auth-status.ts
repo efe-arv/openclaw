@@ -45,7 +45,7 @@ import { resolveModelProviderCapabilities } from "./model-provider-capabilities.
 import { resolveProviderApiKeys } from "./models-auth-status-api-keys.js";
 import {
   projectModelAuthStatusProvider,
-  resolveConfigBoundProfileIds,
+  resolveConfigBoundAuthBindings,
   resolveConfiguredProviders,
 } from "./models-auth-status-projection.js";
 import {
@@ -205,6 +205,7 @@ function createAuthLogoutAbortOps(context: GatewayRequestContext): ChatAbortOps 
 async function removeProviderAuthProfilesAcrossOwnerStores(params: {
   provider: string;
   agentDir: string;
+  inheritedAuthDir?: string;
   profileIds: string[];
 }): Promise<boolean> {
   const ownerAgentDirs = new Set<string | undefined>([params.agentDir]);
@@ -212,6 +213,7 @@ async function removeProviderAuthProfilesAcrossOwnerStores(params: {
     ownerAgentDirs.add(
       resolvePersistedAuthProfileOwnerAgentDir({
         agentDir: params.agentDir,
+        ...(params.inheritedAuthDir ? { inheritedAuthDir: params.inheritedAuthDir } : {}),
         profileId,
       }),
     );
@@ -290,15 +292,12 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
             resolveProviderIdForAuth(credential.provider, authAliasLookupParams) === authProvider,
         )
         .map(([profileId]) => profileId);
-      const configBoundProfileIds = resolveConfigBoundProfileIds(
+      const configBoundAuthProviders = resolveConfigBoundAuthBindings(
         preparedSnapshot.config,
         preparedSnapshot.authStore,
         authAliasLookupParams,
-      );
-      if (
-        selection.profileIds &&
-        availableProfileIds.some((profileId) => configBoundProfileIds.has(profileId))
-      ) {
+      ).authProviders;
+      if (selection.profileIds && configBoundAuthProviders.has(authProvider)) {
         respond(
           false,
           undefined,
@@ -411,15 +410,21 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
       return;
     }
     try {
-      const cfg = context.getRuntimeConfig();
-      const scope = resolveModelAuthAgentScope(cfg, params.agentId);
+      const runtimeCfg = context.getRuntimeConfig();
+      const scope = resolveModelAuthAgentScope(runtimeCfg, params.agentId);
       if (!scope.ok) {
         respond(false, undefined, modelAuthAgentScopeError(scope));
         return;
       }
-      const { agentDir } = scope;
+      const preparedSnapshot = await readPreparedCatalog(context, scope.agentId);
+      if (!preparedSnapshot) {
+        throw new Error(`prepared model auth owner is unavailable (${scope.agentId})`);
+      }
+      const { agentDir, inheritedAuthDir, config: cfg } = preparedSnapshot;
       const authProvider = resolveProviderIdForAuth(provider, { config: cfg });
-      const store = ensureAuthProfileStoreWithoutExternalProfiles(agentDir);
+      const store = inheritedAuthDir
+        ? ensureAuthProfileStoreWithoutExternalProfiles(agentDir, { inheritedAuthDir })
+        : ensureAuthProfileStoreWithoutExternalProfiles(agentDir);
       const availableProfiles = listProfilesForProvider(store, provider);
       const removedProfiles = selection.profileIds ?? availableProfiles;
       if (
@@ -440,7 +445,7 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         return;
       }
       const configBoundProfileIds = selection.profileIds
-        ? resolveConfigBoundProfileIds(cfg, store)
+        ? resolveConfigBoundAuthBindings(cfg, store).profileIds
         : null;
       if (selection.profileIds?.some((profileId) => configBoundProfileIds?.has(profileId))) {
         respond(
@@ -450,11 +455,27 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
         );
         return;
       }
+      if (!preparedModelRuntimeConfigsMatch(cfg, context.getRuntimeConfig())) {
+        respond(
+          false,
+          undefined,
+          errorShape(
+            ErrorCodes.UNAVAILABLE,
+            "provider accounts changed while signing out; refresh and try again",
+          ),
+        );
+        return;
+      }
       const removed = selection.profileIds
-        ? await removeAuthProfilesAcrossOwnerStores({ agentDir, profileIds: removedProfiles })
+        ? await removeAuthProfilesAcrossOwnerStores({
+            agentDir,
+            ...(inheritedAuthDir ? { inheritedAuthDir } : {}),
+            profileIds: removedProfiles,
+          })
         : await removeProviderAuthProfilesAcrossOwnerStores({
             provider,
             agentDir,
+            ...(inheritedAuthDir ? { inheritedAuthDir } : {}),
             profileIds: removedProfiles,
           });
       if (!removed) {
@@ -628,13 +649,8 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
           )
           .map(([profileId]) => profileId),
       );
-      const configBoundProfileIds = resolveConfigBoundProfileIds(cfg, store, authAliasLookupParams);
-      const configBoundAuthProviders = new Set(
-        [...configBoundProfileIds].flatMap((profileId) => {
-          const profile = store.profiles[profileId];
-          return profile ? [resolveProviderIdForAuth(profile.provider, authAliasLookupParams)] : [];
-        }),
-      );
+      const { profileIds: configBoundProfileIds, authProviders: configBoundAuthProviders } =
+        resolveConfigBoundAuthBindings(cfg, store, authAliasLookupParams);
       const providers = authHealth.providers.map((prov) =>
         projectModelAuthStatusProvider({
           provider: prov,
