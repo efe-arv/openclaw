@@ -185,7 +185,7 @@ async function resolveReviewSkills(
   config: OpenClawConfig,
   env?: NodeJS.ProcessEnv,
 ): Promise<Array<ReviewSkill & { treeHash: string }>> {
-  const skills = listWritableWorkshopSkillSummaries({ config, env });
+  const skills = listWritableWorkshopSkillSummaries({ config: resolveReviewConfig(config), env });
   const hashes = await Promise.all(
     skills.map(async (skill) => await readSkillProposalTargetTreeSha256(skill.baseDir)),
   );
@@ -196,6 +196,20 @@ async function resolveReviewSkills(
     }
     return Object.assign(skill, { treeHash });
   });
+}
+
+function resolveReviewConfig(config: OpenClawConfig): OpenClawConfig {
+  return {
+    ...config,
+    skills: {
+      ...config.skills,
+      limits: {
+        ...config.skills?.limits,
+        maxCandidatesPerRoot: Number.MAX_SAFE_INTEGER,
+        maxSkillsLoadedPerSource: Number.MAX_SAFE_INTEGER,
+      },
+    },
+  };
 }
 
 function parseDropReasons(outputText: string | undefined): Map<string, string> {
