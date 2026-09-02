@@ -222,25 +222,50 @@ export type AuthProfileOrderResolution = {
   hasExplicitOrder: boolean;
 };
 
+/** Lists record entries owned by the same canonical auth provider. */
+export function listProviderAuthStateEntries<T>(
+  entries: Record<string, T> | undefined,
+  provider: string,
+  authAliasLookupParams?: ProviderAuthAliasLookupParams,
+): Array<[string, T]> {
+  const canonicalProvider = resolveProviderIdForAuth(provider, authAliasLookupParams);
+  return Object.entries(entries ?? {})
+    .filter(([key]) => resolveProviderIdForAuth(key, authAliasLookupParams) === canonicalProvider)
+    .toSorted(([left], [right]) => left.localeCompare(right));
+}
+
+/** Reads canonical auth-provider state before any equivalent alias entry. */
+export function readProviderAuthState<T>(
+  entries: Record<string, T> | undefined,
+  provider: string,
+  authAliasLookupParams?: ProviderAuthAliasLookupParams,
+): T | undefined {
+  const canonicalProvider = resolveProviderIdForAuth(provider, authAliasLookupParams);
+  const matches = listProviderAuthStateEntries(entries, canonicalProvider, authAliasLookupParams);
+  return (
+    matches.find(([key]) => normalizeProviderId(key) === canonicalProvider)?.[1] ?? matches[0]?.[1]
+  );
+}
+
 /** Shares stored-over-config order precedence with CLI runtime selection. */
 export function resolveExplicitAuthOrderSelection(params: {
   storeOrder: AuthProfileStore["order"] | undefined;
   configuredOrder: Record<string, string[]> | undefined;
-  providerKey: string;
-  providerAuthKey: string;
+  provider: string;
+  authAliasLookupParams?: ProviderAuthAliasLookupParams;
 }): {
   order: string[] | undefined;
   fromStore: boolean;
 } {
-  const { storeOrder, configuredOrder, providerKey, providerAuthKey } = params;
-  const stored =
-    findNormalizedProviderValue(storeOrder, providerAuthKey) ??
-    findNormalizedProviderValue(storeOrder, providerKey);
+  const stored = readProviderAuthState(
+    params.storeOrder,
+    params.provider,
+    params.authAliasLookupParams,
+  );
   return {
     order:
       stored ??
-      findNormalizedProviderValue(configuredOrder, providerAuthKey) ??
-      findNormalizedProviderValue(configuredOrder, providerKey),
+      readProviderAuthState(params.configuredOrder, params.provider, params.authAliasLookupParams),
     fromStore: stored !== undefined,
   };
 }
@@ -250,7 +275,6 @@ export function resolveAuthProfileOrderWithMetadata(
   params: ResolveAuthProfileOrderParams,
 ): AuthProfileOrderResolution {
   const { cfg, store, provider, preferredProfile, forModel } = params;
-  const providerKey = normalizeProviderId(provider);
   const providerAuthKey = resolveProviderIdForAuth(provider, {
     config: cfg,
     ...params.authAliasLookupParams,
@@ -265,8 +289,11 @@ export function resolveAuthProfileOrderWithMetadata(
     resolveExplicitAuthOrderSelection({
       storeOrder: store.order,
       configuredOrder: cfg?.auth?.order,
-      providerKey,
-      providerAuthKey,
+      provider,
+      authAliasLookupParams: {
+        config: cfg,
+        ...params.authAliasLookupParams,
+      },
     });
   const explicitProfiles = cfg?.auth?.profiles
     ? Object.entries(cfg.auth.profiles)

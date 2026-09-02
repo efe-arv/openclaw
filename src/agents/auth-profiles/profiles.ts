@@ -4,7 +4,6 @@
  * records through locked or immediate store writes.
  */
 import { isDeepStrictEqual } from "node:util";
-import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
 import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import {
@@ -12,6 +11,7 @@ import {
   resolveProviderIdForAuth,
 } from "../provider-auth-aliases.js";
 import { normalizeAuthProfileCredential } from "./credential-normalize.js";
+import { listProviderAuthStateEntries, readProviderAuthState } from "./order.js";
 import { mergeAuthProfileStores } from "./persisted.js";
 import { dedupeProfileIds, listProfilesForProvider } from "./profile-list.js";
 import { removeRuntimeExternalProfileReferences } from "./runtime-external-profile-references.js";
@@ -46,29 +46,6 @@ export class AuthProfileOrderChangedError extends Error {
     super("auth profiles changed while priority was being saved");
     this.name = "AuthProfileOrderChangedError";
   }
-}
-
-function listProviderAuthStateEntries<T>(
-  entries: Record<string, T> | undefined,
-  provider: string,
-  authAliasLookupParams?: ProviderAuthAliasLookupParams,
-): Array<[string, T]> {
-  const canonicalProvider = resolveProviderIdForAuth(provider, authAliasLookupParams);
-  return Object.entries(entries ?? {})
-    .filter(([key]) => resolveProviderIdForAuth(key, authAliasLookupParams) === canonicalProvider)
-    .toSorted(([left], [right]) => left.localeCompare(right));
-}
-
-function readProviderAuthState<T>(
-  entries: Record<string, T> | undefined,
-  provider: string,
-  authAliasLookupParams?: ProviderAuthAliasLookupParams,
-): T | undefined {
-  const canonicalProvider = resolveProviderIdForAuth(provider, authAliasLookupParams);
-  const matches = listProviderAuthStateEntries(entries, canonicalProvider, authAliasLookupParams);
-  return (
-    matches.find(([key]) => normalizeProviderId(key) === canonicalProvider)?.[1] ?? matches[0]?.[1]
-  );
 }
 
 function replaceProviderAuthState<T>(

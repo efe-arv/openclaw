@@ -244,8 +244,11 @@ function resolveCliRuntimeFromAuthProfile(
   const selection = resolveExplicitAuthOrderSelection({
     storeOrder: store?.order,
     configuredOrder: params.cfg?.auth?.order,
-    providerKey: provider,
-    providerAuthKey,
+    provider,
+    authAliasLookupParams: {
+      config: params.cfg,
+      ...(params.metadataSnapshot ? { metadataSnapshot: params.metadataSnapshot } : {}),
+    },
   });
   for (const profileId of selection.order ?? []) {
     const profile = configuredProfiles[profileId] ?? store?.profiles[profileId];

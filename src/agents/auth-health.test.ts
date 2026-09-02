@@ -588,12 +588,12 @@ describe("buildAuthHealthSummary", () => {
     ]);
   });
 
-  it("uses caller-owned plugin metadata when resolving explicit auth order", () => {
+  it("resolves explicit auth order written under a sibling provider alias", () => {
     vi.spyOn(Date, "now").mockReturnValue(now);
     resolveProviderIdForAuthMock.mockImplementation((provider: string, params?: unknown) => {
       const metadata = (params as { metadataSnapshot?: { plugins?: unknown[] } } | undefined)
         ?.metadataSnapshot;
-      return provider === "fixture-alias" && metadata?.plugins?.length
+      return ["fixture-alias", "fixture-secondary"].includes(provider) && metadata?.plugins?.length
         ? "fixture-provider"
         : provider;
     });
@@ -602,12 +602,15 @@ describe("buildAuthHealthSummary", () => {
         {
           id: "fixture-auth-alias",
           origin: "bundled" as const,
-          providerAuthAliases: { "fixture-alias": "fixture-provider" },
+          providerAuthAliases: {
+            "fixture-alias": "fixture-provider",
+            "fixture-secondary": "fixture-provider",
+          },
         },
       ],
     } as unknown as NonNullable<ProviderAuthAliasLookupParams["metadataSnapshot"]>;
     const summary = buildAuthHealthSummary({
-      cfg: { auth: { order: { "fixture-provider": [] } } },
+      cfg: { auth: { order: { "fixture-secondary": [] } } },
       store: {
         version: 1,
         profiles: {

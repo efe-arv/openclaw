@@ -282,8 +282,8 @@ export const modelsAuthStatusHandlers: GatewayRequestHandlers = {
       const configuredOrder = resolveExplicitAuthOrderSelection({
         storeOrder: preparedSnapshot.authStore.order,
         configuredOrder: preparedSnapshot.config.auth?.order,
-        providerKey: normalizeProviderId(provider),
-        providerAuthKey: authProvider,
+        provider,
+        authAliasLookupParams,
       });
       if (
         selection.profileIds &&

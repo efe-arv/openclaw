@@ -69,8 +69,8 @@ export function projectModelAuthStatusProvider(params: {
   const profileOrder = resolveExplicitAuthOrderSelection({
     storeOrder: store.order,
     configuredOrder: config.auth?.order,
-    providerKey,
-    providerAuthKey: authProviderKey,
+    provider: provider.provider,
+    authAliasLookupParams,
   });
   const localOrderProviders = new Set(
     getRuntimeLocalOrderProviders(store).map((providerId) =>

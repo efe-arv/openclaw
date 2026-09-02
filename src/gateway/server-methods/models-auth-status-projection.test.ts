@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { AuthProviderHealth } from "../../agents/auth-health.js";
 import type { AuthProfileStore, RuntimeAuthProfileStore } from "../../agents/auth-profiles.js";
+import type { ProviderAuthAliasLookupParams } from "../../agents/provider-auth-aliases.js";
 import type { OpenClawConfig } from "../../config/config.js";
+import { createPluginMetadataSnapshotFixture } from "../../plugins/plugin-metadata.test-support.js";
 import {
   projectModelAuthStatusProvider,
   resolveConfigBoundAuthBindings,
@@ -9,10 +11,10 @@ import {
 
 const profileId = "openai:default";
 
-function health(profileIds: string[] = [profileId]): AuthProviderHealth {
+function health(profileIds: string[] = [profileId], provider = "openai"): AuthProviderHealth {
   const profiles = profileIds.map((id) => ({
     profileId: id,
-    provider: "openai",
+    provider,
     type: "oauth" as const,
     status: "ok" as const,
     expiresAt: 1_000_000,
@@ -20,13 +22,14 @@ function health(profileIds: string[] = [profileId]): AuthProviderHealth {
     source: "store" as const,
     label: id,
   }));
-  return { provider: "openai", status: "ok", profiles };
+  return { provider, status: "ok", profiles };
 }
 
 function project(params: {
   store: AuthProfileStore;
   config?: OpenClawConfig;
   provider?: AuthProviderHealth;
+  authAliasLookupParams?: ProviderAuthAliasLookupParams;
   includeProfileIdentity?: boolean;
 }) {
   const config = params.config ?? {};
@@ -34,7 +37,7 @@ function project(params: {
     provider: params.provider ?? health(),
     config,
     store: params.store,
-    authAliasLookupParams: { config },
+    authAliasLookupParams: params.authAliasLookupParams ?? { config },
     usageByProvider: new Map(),
     expectsOAuthProviders: new Set(),
     apiKeys: new Map(),
@@ -101,6 +104,36 @@ describe("projectModelAuthStatusProvider", () => {
     expect(provider.profileOrder).toEqual([profileId]);
     expect(provider.profileOrderStored).toBeUndefined();
     expect(provider.profiles[0]?.source).toBe("inherited");
+  });
+
+  it("projects a stored order written under a provider auth alias", () => {
+    const aliasedProfileId = "gmi:default";
+    const metadataSnapshot = createPluginMetadataSnapshotFixture({
+      plugins: [
+        {
+          id: "gmi",
+          providerAuthAliases: { "gmi-cloud": "gmi" },
+        },
+      ],
+    });
+    const store: RuntimeAuthProfileStore = {
+      version: 1,
+      profiles: {
+        [aliasedProfileId]: credential({ provider: "gmi" }),
+      },
+      order: { "gmi-cloud": [aliasedProfileId] },
+      runtimeLocalProfileIds: [aliasedProfileId],
+      runtimeLocalOrderProviders: ["gmi-cloud"],
+    };
+
+    const provider = project({
+      store,
+      provider: health([aliasedProfileId], "gmi"),
+      authAliasLookupParams: { metadataSnapshot },
+    });
+
+    expect(provider.profileOrder).toEqual([aliasedProfileId]);
+    expect(provider.profileOrderStored).toBe(true);
   });
 
   it("marks configured profile order as externally managed", () => {
