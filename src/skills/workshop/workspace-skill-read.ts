@@ -46,7 +46,7 @@ export function listWritableWorkshopSkillSummaries(
   });
   return records
     .map(({ skill }) => ({
-      name: path.basename(skill.baseDir),
+      name: skill.name,
       description: skill.description,
       baseDir: skill.baseDir,
       filePath: skill.filePath,
