@@ -84,9 +84,30 @@ public actor GatewayNodeSession {
     }
 
     private struct ActiveInvoke {
+        enum State {
+            case pending
+            case cancelled
+            case running(Task<BridgeInvokeResponse, Never>)
+        }
+
         let requestID: String
         let admissionGeneration: UInt64
-        let task: Task<BridgeInvokeResponse, Never>
+        let waitsForRouteTeardown: Bool
+        var state: State = .pending
+
+        var task: Task<BridgeInvokeResponse, Never>? {
+            if case let .running(task) = self.state {
+                task
+            } else { nil }
+        }
+
+        mutating func cancel() {
+            switch self.state {
+            case .pending: self.state = .cancelled
+            case let .running(task): task.cancel()
+            case .cancelled: break
+            }
+        }
     }
 
     private struct LifecycleCallbackBarrier {
@@ -1158,11 +1179,30 @@ extension GatewayNodeSession {
                 admissionGeneration: admissionGeneration,
                 socketGeneration: socketGeneration)
             let receiptScope = self.computerInvokeReceiptScope()
+            let waitsForRouteTeardown = request.command == OpenClawComputerCommand.act.rawValue ||
+                request.command == OpenClawCameraCommand.ptzControl.rawValue ||
+                OpenClawTalkCommand(rawValue: request.command) != nil
+            let invokeID: UUID?
+            if waitsForRouteTeardown || request.command == OpenClawSystemCommand.notify.rawValue ||
+                request.command == OpenClawChatCommand.push.rawValue
+            {
+                let id = UUID()
+                // Register before returning to receive: a following cancel must retire
+                // this request even while its detached timeout/receipt work is queued.
+                self.activeInvokes[id] = ActiveInvoke(
+                    requestID: request.id,
+                    admissionGeneration: admissionGeneration,
+                    waitsForRouteTeardown: waitsForRouteTeardown)
+                invokeID = id
+            } else {
+                invokeID = nil
+            }
             // GatewayChannel waits for push handling before it rearms receive. Run device work
             // separately so a long invoke cannot starve heartbeats or later node requests.
             Task.detached { [weak self] in
                 await self?.handleInvokeRequest(
                     request: request,
+                    invokeID: invokeID,
                     onInvoke: onInvoke,
                     route: route,
                     receiptScope: receiptScope,
@@ -1176,12 +1216,20 @@ extension GatewayNodeSession {
 
     private func handleInvokeRequest(
         request: NodeInvokeRequestPayload,
+        invokeID: UUID?,
         onInvoke: @escaping @Sendable (BridgeInvokeRequest) async -> BridgeInvokeResponse,
         route: GatewayNodeSessionRoute,
         receiptScope: String,
         channel: GatewayChannelActor,
         socketGeneration: UInt64) async
     {
+        defer {
+            // A joined computer receipt never starts another operation. Its pending
+            // admission ends here; running operations retain cleanup ownership.
+            if let invokeID, self.activeInvokes[invokeID]?.task == nil {
+                self.activeInvokes.removeValue(forKey: invokeID)
+            }
+        }
         guard self.isCurrentRoute(route),
               self.channel === channel
         else { return }
@@ -1216,6 +1264,7 @@ extension GatewayNodeSession {
             }
             return await self.invokeIfCurrentRoute(
                 req,
+                invokeID: invokeID,
                 expectedRoute: route,
                 onInvoke: onInvoke)
         }
@@ -1239,8 +1288,9 @@ extension GatewayNodeSession {
             socketGeneration: socketGeneration)
     }
 
-    func invokeIfCurrentRoute(
+    private func invokeIfCurrentRoute(
         _ request: BridgeInvokeRequest,
+        invokeID: UUID?,
         expectedRoute: GatewayNodeSessionRoute,
         onInvoke: @escaping @Sendable (BridgeInvokeRequest) async -> BridgeInvokeResponse) async
         -> BridgeInvokeResponse
@@ -1248,20 +1298,17 @@ extension GatewayNodeSession {
         guard self.isCurrentRoute(expectedRoute),
               self.channel != nil
         else { return Self.staleRouteInvokeResponse(requestId: request.id) }
-        let requiresRouteScopedCancellation = request.command == "computer.act" ||
-            request.command == OpenClawCameraCommand.ptzControl.rawValue ||
-            OpenClawTalkCommand(rawValue: request.command) != nil
-        guard requiresRouteScopedCancellation else {
+        guard let invokeID else {
             return await onInvoke(request)
         }
-        // These side-effecting commands own explicit cancellation cleanup. Route
-        // teardown waits for it so a replacement cannot inherit input ownership.
-        let invokeID = UUID()
+        guard !Task.isCancelled, case .pending? = self.activeInvokes[invokeID]?.state else {
+            return BridgeInvokeResponse(
+                id: request.id,
+                ok: false,
+                error: OpenClawNodeError(code: .unavailable, message: "node invoke cancelled"))
+        }
         let task = Task { await onInvoke(request) }
-        self.activeInvokes[invokeID] = ActiveInvoke(
-            requestID: request.id,
-            admissionGeneration: expectedRoute.admissionGeneration,
-            task: task)
+        self.activeInvokes[invokeID]?.state = .running(task)
         let response = await withTaskCancellationHandler {
             await task.value
         } onCancel: {
@@ -1369,22 +1416,26 @@ extension GatewayNodeSession {
     private func cancelActiveInvokes(
         admissionGeneration: UInt64) -> [(id: UUID, task: Task<BridgeInvokeResponse, Never>)]
     {
-        let matches = self.activeInvokes.compactMap { id, invoke in
-            invoke.admissionGeneration == admissionGeneration
-                ? (id: id, task: invoke.task)
-                : nil
+        var cleanup: [(id: UUID, task: Task<BridgeInvokeResponse, Never>)] = []
+        for (id, var invoke) in self.activeInvokes where invoke.admissionGeneration == admissionGeneration {
+            invoke.cancel()
+            if invoke.waitsForRouteTeardown, let task = invoke.task {
+                self.activeInvokes[id] = invoke
+                cleanup.append((id, task))
+            } else {
+                // Notification permission callbacks can ignore cancellation. Fence
+                // their effect, but never make them hold replacement routes open.
+                self.activeInvokes.removeValue(forKey: id)
+            }
         }
-        for match in matches {
-            match.task.cancel()
-        }
-        return matches
+        return cleanup
     }
 
     private func cancelActiveInvoke(requestID: String, admissionGeneration: UInt64) {
-        for invoke in self.activeInvokes.values
+        for (id, invoke) in self.activeInvokes
             where invoke.requestID == requestID && invoke.admissionGeneration == admissionGeneration
         {
-            invoke.task.cancel()
+            self.activeInvokes[id]?.cancel()
         }
     }
 
